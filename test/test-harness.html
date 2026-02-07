@@ -107,6 +107,12 @@
       color: #e94560;
       font-size: 12px;
     }
+    #gvm-load-error {
+      color: #e74c3c;
+      margin-top: 8px;
+      font-size: 13px;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -123,6 +129,7 @@
   </div>
 
   <button class="btn-load-gvm" id="load-gvm">Load GVM Engine</button>
+  <div id="gvm-load-error"></div>
 
   <div class="instructions">
     <h3>Testing Guide</h3>
@@ -136,54 +143,948 @@
     </ol>
   </div>
 
-  <!-- Load the test game -->
-  <script src="test-game.js"></script>
-
-  <!-- Load GVM source files in order -->
+  <!-- ============================================================ -->
+  <!-- Test Game (inline) -->
+  <!-- ============================================================ -->
   <script>
-    document.getElementById('load-gvm').addEventListener('click', function() {
-      var scripts = [
-        '../src/utils/type-checks.js',
-        '../src/utils/safe-traverse.js',
-        '../src/utils/iframe-access.js',
-        '../src/core/object-walker.js',
-        '../src/core/value-store.js',
-        '../src/core/scanner.js',
-        '../src/core/modifier.js',
-        '../src/core/speed-hack.js',
-        '../src/ui/scan-tab.js',
-        '../src/ui/results-tab.js',
-        '../src/ui/frozen-tab.js',
-        '../src/ui/speed-tab.js',
-        '../src/ui/overlay.js',
-        '../src/main.js'
-      ];
+  (function() {
+    'use strict';
 
-      var loaded = 0;
-
-      function loadNext() {
-        if (loaded >= scripts.length) {
-          // All scripts loaded, now load CSS and init
-          fetch('../src/ui/styles.css')
-            .then(function(r) { return r.text(); })
-            .then(function(css) {
-              window.GVM.init(css);
-            });
-          return;
-        }
-        var s = document.createElement('script');
-        s.src = scripts[loaded];
-        s.onload = function() {
-          loaded++;
-          loadNext();
-        };
-        document.body.appendChild(s);
+    window.TestGame = {
+      player: {
+        name: 'Hero',
+        health: 100,
+        maxHealth: 100,
+        mana: 50,
+        maxMana: 50,
+        level: 1,
+        experience: 0,
+        gold: 250,
+        attack: 15,
+        defense: 10,
+        speed: 5,
+        position: { x: 100, y: 200 },
+        alive: true
+      },
+      inventory: {
+        potions: 3,
+        arrows: 20,
+        keys: 1,
+        items: ['sword', 'shield', 'potion']
+      },
+      world: {
+        time: 0,
+        day: 1,
+        weather: 'sunny',
+        difficulty: 1.0,
+        enemies: [
+          { name: 'Goblin', hp: 30, attack: 5 },
+          { name: 'Orc', hp: 80, attack: 12 },
+          { name: 'Dragon', hp: 500, attack: 50 }
+        ],
+        score: 0
       }
+    };
 
-      loadNext();
-      this.disabled = true;
-      this.textContent = 'GVM Loaded!';
-    });
+    var gameLoop = null;
+    var tickCount = 0;
+
+    function gameTick() {
+      tickCount++;
+      var game = window.TestGame;
+      game.world.time += 1;
+      if (game.world.time >= 100) {
+        game.world.time = 0;
+        game.world.day++;
+      }
+      game.world.score += Math.floor(Math.random() * 5);
+      if (tickCount % 10 === 0 && game.player.health > 0) {
+        var dmg = Math.floor(Math.random() * 5) + 1;
+        game.player.health = Math.max(0, game.player.health - dmg);
+        if (game.player.health <= 0) game.player.alive = false;
+      }
+      if (game.player.mana < game.player.maxMana) {
+        game.player.mana = Math.min(game.player.maxMana, game.player.mana + 1);
+      }
+      game.player.experience += 1;
+      if (game.player.experience >= game.player.level * 100) {
+        game.player.experience = 0;
+        game.player.level++;
+        game.player.attack += 2;
+        game.player.defense += 1;
+      }
+      updateDisplay();
+    }
+
+    function updateDisplay() {
+      var game = window.TestGame;
+      var el = document.getElementById('game-display');
+      if (!el) return;
+      el.innerHTML = [
+        '<div class="game-stat"><span>Name:</span> ' + game.player.name + '</div>',
+        '<div class="game-stat"><span>HP:</span> <div class="bar"><div class="bar-fill hp" style="width:' + (game.player.health / game.player.maxHealth * 100) + '%"></div></div> ' + game.player.health + '/' + game.player.maxHealth + '</div>',
+        '<div class="game-stat"><span>Mana:</span> <div class="bar"><div class="bar-fill mana" style="width:' + (game.player.mana / game.player.maxMana * 100) + '%"></div></div> ' + game.player.mana + '/' + game.player.maxMana + '</div>',
+        '<div class="game-stat"><span>Level:</span> ' + game.player.level + '</div>',
+        '<div class="game-stat"><span>XP:</span> ' + game.player.experience + '/' + (game.player.level * 100) + '</div>',
+        '<div class="game-stat"><span>Gold:</span> ' + game.player.gold + '</div>',
+        '<div class="game-stat"><span>ATK:</span> ' + game.player.attack + ' | <span>DEF:</span> ' + game.player.defense + '</div>',
+        '<div class="game-stat"><span>Potions:</span> ' + game.inventory.potions + '</div>',
+        '<div class="game-stat"><span>Arrows:</span> ' + game.inventory.arrows + '</div>',
+        '<div class="game-stat"><span>Score:</span> ' + game.world.score + '</div>',
+        '<div class="game-stat"><span>Day:</span> ' + game.world.day + ' | <span>Time:</span> ' + game.world.time + '</div>',
+        '<div class="game-stat"><span>Status:</span> ' + (game.player.alive ? 'Alive' : 'DEAD') + '</div>'
+      ].join('');
+    }
+
+    window.TestGame.start = function() {
+      if (gameLoop) clearInterval(gameLoop);
+      window.TestGame.player.health = 100;
+      window.TestGame.player.alive = true;
+      tickCount = 0;
+      gameLoop = setInterval(gameTick, 500);
+      updateDisplay();
+    };
+
+    window.TestGame.stop = function() {
+      if (gameLoop) { clearInterval(gameLoop); gameLoop = null; }
+    };
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(function() { window.TestGame.start(); }, 100);
+    } else {
+      document.addEventListener('DOMContentLoaded', function() { window.TestGame.start(); });
+    }
+  })();
+  </script>
+
+  <!-- ============================================================ -->
+  <!-- GVM Engine (all modules inline) -->
+  <!-- ============================================================ -->
+  <script>
+  // ---- utils/type-checks.js ----
+  (function(GVM) {
+    'use strict';
+    var typeChecks = {};
+    typeChecks.isNumber = function(val) { return typeof val === 'number' && isFinite(val); };
+    typeChecks.isString = function(val) { return typeof val === 'string'; };
+    typeChecks.isBoolean = function(val) { return typeof val === 'boolean'; };
+    typeChecks.isScannable = function(val) { return typeChecks.isNumber(val) || typeChecks.isString(val) || typeChecks.isBoolean(val); };
+    typeChecks.isPlainObject = function(val) {
+      if (!val || typeof val !== 'object') return false;
+      if (Array.isArray(val)) return true;
+      if (val.nodeType) return false;
+      if (val.window === val && val.document) return false;
+      var tag = Object.prototype.toString.call(val);
+      if (tag.indexOf('Array') > -1 && tag !== '[object Array]') return false;
+      if (tag === '[object ArrayBuffer]') return false;
+      if (tag === '[object WebGLRenderingContext]') return false;
+      if (tag === '[object WebGL2RenderingContext]') return false;
+      if (tag === '[object CanvasRenderingContext2D]') return false;
+      return true;
+    };
+    GVM.utils = GVM.utils || {};
+    GVM.utils.typeChecks = typeChecks;
+  })(window.GVM = window.GVM || {});
+
+  // ---- utils/safe-traverse.js ----
+  (function(GVM) {
+    'use strict';
+    var safeTraverse = {};
+    safeTraverse.safeGet = function(obj, key) { try { return { value: obj[key], ok: true }; } catch (e) { return { value: undefined, ok: false }; } };
+    safeTraverse.safeSet = function(obj, key, value) { try { obj[key] = value; return true; } catch (e) { return false; } };
+    safeTraverse.safeKeys = function(obj) { try { return Object.keys(obj); } catch (e) { return []; } };
+    safeTraverse.getByPath = function(root, pathArray) {
+      var current = root;
+      for (var i = 0; i < pathArray.length; i++) {
+        var result = safeTraverse.safeGet(current, pathArray[i]);
+        if (!result.ok) return { value: undefined, ok: false };
+        current = result.value;
+      }
+      return { value: current, ok: true };
+    };
+    safeTraverse.setByPath = function(root, pathArray, value) {
+      if (pathArray.length === 0) return false;
+      var current = root;
+      for (var i = 0; i < pathArray.length - 1; i++) {
+        var result = safeTraverse.safeGet(current, pathArray[i]);
+        if (!result.ok || !result.value || typeof result.value !== 'object') return false;
+        current = result.value;
+      }
+      return safeTraverse.safeSet(current, pathArray[pathArray.length - 1], value);
+    };
+    GVM.utils = GVM.utils || {};
+    GVM.utils.safeTraverse = safeTraverse;
+  })(window.GVM = window.GVM || {});
+
+  // ---- utils/iframe-access.js ----
+  (function(GVM) {
+    'use strict';
+    var iframeAccess = {};
+    iframeAccess.getAccessibleWindows = function() {
+      var windows = [{ win: window, label: 'Main Window' }];
+      var iframes = document.querySelectorAll('iframe');
+      for (var i = 0; i < iframes.length; i++) {
+        try {
+          var iframeWin = iframes[i].contentWindow;
+          var _test = iframeWin.document;
+          windows.push({ win: iframeWin, label: 'iframe[' + i + '] ' + (iframes[i].src || '').substring(0, 50) });
+        } catch (e) { }
+      }
+      return windows;
+    };
+    GVM.utils = GVM.utils || {};
+    GVM.utils.iframeAccess = iframeAccess;
+  })(window.GVM = window.GVM || {});
+
+  // ---- core/object-walker.js ----
+  (function(GVM) {
+    'use strict';
+    var typeChecks = GVM.utils.typeChecks;
+    var safeTraverse = GVM.utils.safeTraverse;
+    var objectWalker = {};
+    var SKIP_KEYS = { '__GVM_LOADED__': true, '__GVM__': true, 'GVM': true, 'chrome': true, 'caches': true, 'cookieStore': true, 'serviceWorker': true, 'localStorage': true, 'sessionStorage': true, 'indexedDB': true };
+    objectWalker.walk = function(root, callback, options) {
+      options = options || {};
+      var maxDepth = options.maxDepth || 7;
+      var maxResults = options.maxResults || 50000;
+      var visited = new WeakSet();
+      var resultCount = 0;
+      var queue = [{ obj: root, path: [], depth: 0 }];
+      while (queue.length > 0 && resultCount < maxResults) {
+        var item = queue.shift();
+        var obj = item.obj;
+        var path = item.path;
+        var depth = item.depth;
+        if (depth > maxDepth) continue;
+        if (!obj || typeof obj !== 'object') continue;
+        try { if (visited.has(obj)) continue; visited.add(obj); } catch (e) { continue; }
+        var keys = safeTraverse.safeKeys(obj);
+        if (Array.isArray(obj)) {
+          for (var ai = 0; ai < Math.min(obj.length, 1000); ai++) keys.push(String(ai));
+          var seen = {};
+          keys = keys.filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; });
+        }
+        for (var ki = 0; ki < keys.length && resultCount < maxResults; ki++) {
+          var key = keys[ki];
+          if (SKIP_KEYS[key]) continue;
+          var result = safeTraverse.safeGet(obj, key);
+          if (!result.ok) continue;
+          var val = result.value;
+          if (val === null || val === undefined) continue;
+          var childPath = path.concat([key]);
+          if (typeChecks.isScannable(val)) { callback(childPath, val, obj, key); resultCount++; }
+          else if (typeChecks.isPlainObject(val) && depth + 1 <= maxDepth) { queue.push({ obj: val, path: childPath, depth: depth + 1 }); }
+        }
+      }
+      return resultCount;
+    };
+    GVM.core = GVM.core || {};
+    GVM.core.objectWalker = objectWalker;
+  })(window.GVM = window.GVM || {});
+
+  // ---- core/value-store.js ----
+  (function(GVM) {
+    'use strict';
+    var valueStore = {};
+    var state = { candidates: [], frozen: [], scanCount: 0, speedMultiplier: 1.0 };
+    valueStore.getState = function() { return state; };
+    valueStore.getCandidates = function() { return state.candidates; };
+    valueStore.setCandidates = function(c) { state.candidates = c; };
+    valueStore.clearCandidates = function() { state.candidates = []; state.scanCount = 0; };
+    valueStore.getScanCount = function() { return state.scanCount; };
+    valueStore.incrementScanCount = function() { state.scanCount++; };
+    valueStore.getFrozen = function() { return state.frozen; };
+    valueStore.addFrozen = function(entry) { state.frozen.push(entry); };
+    valueStore.removeFrozen = function(index) { var e = state.frozen[index]; if (e && e.intervalId) clearInterval(e.intervalId); state.frozen.splice(index, 1); };
+    valueStore.clearFrozen = function() { for (var i = 0; i < state.frozen.length; i++) { if (state.frozen[i].intervalId) clearInterval(state.frozen[i].intervalId); } state.frozen = []; };
+    valueStore.getSpeedMultiplier = function() { return state.speedMultiplier; };
+    valueStore.setSpeedMultiplier = function(v) { state.speedMultiplier = v; };
+    GVM.core = GVM.core || {};
+    GVM.core.valueStore = valueStore;
+  })(window.GVM = window.GVM || {});
+
+  // ---- core/scanner.js ----
+  (function(GVM) {
+    'use strict';
+    var objectWalker = GVM.core.objectWalker;
+    var valueStore = GVM.core.valueStore;
+    var safeTraverse = GVM.utils.safeTraverse;
+    var iframeAccess = GVM.utils.iframeAccess;
+    var typeChecks = GVM.utils.typeChecks;
+    var scanner = {};
+    scanner.SCAN_EXACT = 'exact'; scanner.SCAN_RANGE = 'range'; scanner.SCAN_UNKNOWN = 'unknown';
+    scanner.SCAN_INCREASED = 'increased'; scanner.SCAN_DECREASED = 'decreased';
+    scanner.SCAN_CHANGED = 'changed'; scanner.SCAN_UNCHANGED = 'unchanged';
+    scanner.SCAN_GREATER_THAN = 'greater_than'; scanner.SCAN_LESS_THAN = 'less_than'; scanner.SCAN_TEXT = 'text';
+    scanner.TYPE_NUMBER = 'number'; scanner.TYPE_STRING = 'string'; scanner.TYPE_ALL = 'all';
+    scanner.getRoots = function() { return iframeAccess.getAccessibleWindows(); };
+    scanner.firstScan = function(scanType, value, options) {
+      options = options || {};
+      var valueType = options.valueType || scanner.TYPE_NUMBER;
+      var candidates = [];
+      var roots = scanner.getRoots();
+      var matchFn = scanner._buildMatchFn(scanType, value, options);
+      for (var ri = 0; ri < roots.length; ri++) {
+        var rootWin = roots[ri].win;
+        (function(rootIndex, rootLabel) {
+          objectWalker.walk(rootWin, function(path, val) {
+            if (valueType === scanner.TYPE_NUMBER && !typeChecks.isNumber(val)) return;
+            if (valueType === scanner.TYPE_STRING && !typeChecks.isString(val)) return;
+            if (matchFn(val)) candidates.push({ rootIndex: rootIndex, rootLabel: rootLabel, path: path, lastValue: val });
+          }, { maxDepth: options.maxDepth || 7 });
+        })(ri, roots[ri].label);
+      }
+      valueStore.setCandidates(candidates);
+      valueStore.incrementScanCount();
+      return candidates.length;
+    };
+    scanner.nextScan = function(scanType, value, options) {
+      options = options || {};
+      var candidates = valueStore.getCandidates();
+      var roots = scanner.getRoots();
+      var matchFn = scanner._buildMatchFn(scanType, value, options);
+      var surviving = [];
+      for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        var root = roots[c.rootIndex];
+        if (!root) continue;
+        var result = safeTraverse.getByPath(root.win, c.path);
+        if (!result.ok) continue;
+        var currentVal = result.value;
+        var matched = false;
+        switch (scanType) {
+          case scanner.SCAN_INCREASED: matched = typeChecks.isNumber(currentVal) && currentVal > c.lastValue; break;
+          case scanner.SCAN_DECREASED: matched = typeChecks.isNumber(currentVal) && currentVal < c.lastValue; break;
+          case scanner.SCAN_CHANGED: matched = currentVal !== c.lastValue; break;
+          case scanner.SCAN_UNCHANGED: matched = currentVal === c.lastValue; break;
+          default: matched = matchFn(currentVal); break;
+        }
+        if (matched) { c.lastValue = currentVal; surviving.push(c); }
+      }
+      valueStore.setCandidates(surviving);
+      valueStore.incrementScanCount();
+      return surviving.length;
+    };
+    scanner.modifyValue = function(candidateIndex, newValue) {
+      var candidates = valueStore.getCandidates();
+      var c = candidates[candidateIndex];
+      if (!c) return false;
+      var roots = scanner.getRoots();
+      var root = roots[c.rootIndex];
+      if (!root) return false;
+      var typedValue = newValue;
+      if (typeChecks.isNumber(c.lastValue)) { typedValue = Number(newValue); if (isNaN(typedValue)) return false; }
+      else if (typeChecks.isBoolean(c.lastValue)) { typedValue = newValue === 'true' || newValue === true; }
+      var success = safeTraverse.setByPath(root.win, c.path, typedValue);
+      if (success) c.lastValue = typedValue;
+      return success;
+    };
+    scanner.refreshValues = function() {
+      var candidates = valueStore.getCandidates();
+      var roots = scanner.getRoots();
+      for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        var root = roots[c.rootIndex];
+        if (!root) continue;
+        var result = safeTraverse.getByPath(root.win, c.path);
+        if (result.ok) c.lastValue = result.value;
+      }
+    };
+    scanner._buildMatchFn = function(scanType, value, options) {
+      switch (scanType) {
+        case scanner.SCAN_EXACT:
+          var numVal = Number(value);
+          return function(v) {
+            if (typeChecks.isNumber(v)) return v === numVal;
+            if (typeChecks.isString(v)) return v === String(value);
+            if (typeChecks.isBoolean(v)) return v === (value === 'true' || value === true);
+            return false;
+          };
+        case scanner.SCAN_RANGE:
+          var min = Number(options.min || 0), max = Number(options.max || 0);
+          return function(v) { return typeChecks.isNumber(v) && v >= min && v <= max; };
+        case scanner.SCAN_GREATER_THAN:
+          var gt = Number(value);
+          return function(v) { return typeChecks.isNumber(v) && v > gt; };
+        case scanner.SCAN_LESS_THAN:
+          var lt = Number(value);
+          return function(v) { return typeChecks.isNumber(v) && v < lt; };
+        case scanner.SCAN_TEXT:
+          var searchStr = String(value).toLowerCase();
+          return function(v) { return typeChecks.isString(v) && v.toLowerCase().indexOf(searchStr) > -1; };
+        case scanner.SCAN_UNKNOWN: default:
+          return function() { return true; };
+      }
+    };
+    GVM.core = GVM.core || {};
+    GVM.core.scanner = scanner;
+  })(window.GVM = window.GVM || {});
+
+  // ---- core/modifier.js ----
+  (function(GVM) {
+    'use strict';
+    var valueStore = GVM.core.valueStore;
+    var safeTraverse = GVM.utils.safeTraverse;
+    var iframeAccess = GVM.utils.iframeAccess;
+    var modifier = {};
+    modifier.freeze = function(candidate, value) {
+      var roots = iframeAccess.getAccessibleWindows();
+      var root = roots[candidate.rootIndex];
+      if (!root) return false;
+      var parentPath = candidate.path.slice(0, -1);
+      var key = candidate.path[candidate.path.length - 1];
+      var parentResult = safeTraverse.getByPath(root.win, parentPath);
+      var frozen = false, originalDescriptor = null, intervalId = null;
+      if (parentResult.ok && parentResult.value) {
+        var parent = parentResult.value;
+        try {
+          originalDescriptor = Object.getOwnPropertyDescriptor(parent, key);
+          Object.defineProperty(parent, key, { get: function() { return value; }, set: function() {}, configurable: true, enumerable: originalDescriptor ? originalDescriptor.enumerable : true });
+          frozen = true;
+        } catch (e) {}
+      }
+      if (!frozen) { intervalId = setInterval(function() { safeTraverse.setByPath(root.win, candidate.path, value); }, 50); }
+      valueStore.addFrozen({ rootIndex: candidate.rootIndex, path: candidate.path.slice(), pathStr: candidate.path.join('.'), value: value, frozen: true, useDefineProperty: frozen, originalDescriptor: originalDescriptor, intervalId: intervalId });
+      return true;
+    };
+    modifier.unfreeze = function(index) {
+      var frozenList = valueStore.getFrozen();
+      var entry = frozenList[index];
+      if (!entry) return false;
+      if (entry.useDefineProperty && entry.originalDescriptor) {
+        var roots = iframeAccess.getAccessibleWindows();
+        var root = roots[entry.rootIndex];
+        if (root) {
+          var parentPath = entry.path.slice(0, -1);
+          var key = entry.path[entry.path.length - 1];
+          var parentResult = safeTraverse.getByPath(root.win, parentPath);
+          if (parentResult.ok && parentResult.value) { try { Object.defineProperty(parentResult.value, key, entry.originalDescriptor); } catch (e) {} }
+        }
+      }
+      valueStore.removeFrozen(index);
+      return true;
+    };
+    modifier.unfreezeAll = function() {
+      var frozenList = valueStore.getFrozen();
+      for (var i = frozenList.length - 1; i >= 0; i--) modifier.unfreeze(i);
+    };
+    GVM.core = GVM.core || {};
+    GVM.core.modifier = modifier;
+  })(window.GVM = window.GVM || {});
+
+  // ---- core/speed-hack.js ----
+  (function(GVM) {
+    'use strict';
+    var valueStore = GVM.core.valueStore;
+    var speedHack = {};
+    var originals = { setTimeout: null, setInterval: null, clearTimeout: null, clearInterval: null, requestAnimationFrame: null, cancelAnimationFrame: null, dateNow: null, perfNow: null };
+    var active = false, baseRealTime = 0, baseFakeTime = 0;
+    speedHack.isActive = function() { return active; };
+    speedHack.getMultiplier = function() { return valueStore.getSpeedMultiplier(); };
+    function getFakeTime() { var realNow = originals.perfNow ? originals.perfNow.call(performance) : Date.now(); return baseFakeTime + (realNow - baseRealTime) * valueStore.getSpeedMultiplier(); }
+    speedHack.activate = function(multiplier) {
+      if (active) { baseFakeTime = getFakeTime(); baseRealTime = originals.perfNow ? originals.perfNow.call(performance) : Date.now(); valueStore.setSpeedMultiplier(multiplier); return; }
+      originals.setTimeout = window.setTimeout.bind(window);
+      originals.setInterval = window.setInterval.bind(window);
+      originals.clearTimeout = window.clearTimeout.bind(window);
+      originals.clearInterval = window.clearInterval.bind(window);
+      originals.requestAnimationFrame = window.requestAnimationFrame.bind(window);
+      originals.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+      originals.dateNow = Date.now;
+      originals.perfNow = performance.now.bind(performance);
+      baseRealTime = originals.perfNow();
+      baseFakeTime = baseRealTime;
+      valueStore.setSpeedMultiplier(multiplier);
+      active = true;
+      window.setTimeout = function(fn, delay) {
+        var args = Array.prototype.slice.call(arguments, 2);
+        var scaledDelay = Math.max(1, Math.round((delay || 0) / valueStore.getSpeedMultiplier()));
+        return originals.setTimeout(function() { if (typeof fn === 'function') fn.apply(null, args); }, scaledDelay);
+      };
+      window.setInterval = function(fn, delay) {
+        var args = Array.prototype.slice.call(arguments, 2);
+        var scaledDelay = Math.max(1, Math.round((delay || 0) / valueStore.getSpeedMultiplier()));
+        return originals.setInterval(function() { if (typeof fn === 'function') fn.apply(null, args); }, scaledDelay);
+      };
+      window.clearTimeout = originals.clearTimeout;
+      window.clearInterval = originals.clearInterval;
+      window.requestAnimationFrame = function(callback) {
+        return originals.requestAnimationFrame(function(realTimestamp) {
+          var fakeTimestamp = baseFakeTime + (realTimestamp - baseRealTime) * valueStore.getSpeedMultiplier();
+          callback(fakeTimestamp);
+        });
+      };
+      window.cancelAnimationFrame = originals.cancelAnimationFrame;
+      Date.now = function() { var realNow = originals.dateNow(); return Math.round(baseFakeTime + (realNow - baseRealTime) * valueStore.getSpeedMultiplier()); };
+      performance.now = function() { var realNow = originals.perfNow(); return baseFakeTime + (realNow - baseRealTime) * valueStore.getSpeedMultiplier(); };
+    };
+    speedHack.deactivate = function() {
+      if (!active) return;
+      window.setTimeout = originals.setTimeout; window.setInterval = originals.setInterval;
+      window.clearTimeout = originals.clearTimeout; window.clearInterval = originals.clearInterval;
+      window.requestAnimationFrame = originals.requestAnimationFrame;
+      window.cancelAnimationFrame = originals.cancelAnimationFrame;
+      Date.now = originals.dateNow; performance.now = originals.perfNow;
+      valueStore.setSpeedMultiplier(1.0); active = false;
+    };
+    GVM.core = GVM.core || {};
+    GVM.core.speedHack = speedHack;
+  })(window.GVM = window.GVM || {});
+  </script>
+
+  <!-- ============================================================ -->
+  <!-- GVM UI (inline) -->
+  <!-- ============================================================ -->
+  <script>
+  // ---- ui/scan-tab.js ----
+  (function(GVM) {
+    'use strict';
+    var scanner = GVM.core.scanner;
+    var valueStore = GVM.core.valueStore;
+    var scanTab = {};
+    var elements = {};
+    scanTab.init = function(container) {
+      container.innerHTML =
+        '<div>' +
+        '  <div class="gvm-label">Value Type</div>' +
+        '  <div class="gvm-row">' +
+        '    <select class="gvm-select" id="gvm-value-type" style="flex:1">' +
+        '      <option value="number">Number</option>' +
+        '      <option value="string">String</option>' +
+        '      <option value="all">All Types</option>' +
+        '    </select>' +
+        '  </div>' +
+        '  <div class="gvm-label">Scan Type</div>' +
+        '  <div class="gvm-row">' +
+        '    <select class="gvm-select" id="gvm-scan-type" style="flex:1">' +
+        '      <option value="exact">Exact Value</option>' +
+        '      <option value="range">Value Range</option>' +
+        '      <option value="greater_than">Greater Than</option>' +
+        '      <option value="less_than">Less Than</option>' +
+        '      <option value="text">Text Search</option>' +
+        '      <option value="unknown">Unknown Initial Value</option>' +
+        '    </select>' +
+        '  </div>' +
+        '  <div id="gvm-value-row" class="gvm-row">' +
+        '    <input class="gvm-input" id="gvm-scan-value" placeholder="Enter value..." />' +
+        '  </div>' +
+        '  <div id="gvm-range-row" class="gvm-row" style="display:none">' +
+        '    <input class="gvm-input" id="gvm-range-min" placeholder="Min" style="width:50%" />' +
+        '    <input class="gvm-input" id="gvm-range-max" placeholder="Max" style="width:50%" />' +
+        '  </div>' +
+        '  <div id="gvm-next-scan-type-row" style="display:none">' +
+        '    <div class="gvm-label">Filter By</div>' +
+        '    <div class="gvm-row">' +
+        '      <select class="gvm-select" id="gvm-next-scan-type" style="flex:1">' +
+        '        <option value="exact">Exact Value</option>' +
+        '        <option value="increased">Increased</option>' +
+        '        <option value="decreased">Decreased</option>' +
+        '        <option value="changed">Changed</option>' +
+        '        <option value="unchanged">Unchanged</option>' +
+        '        <option value="greater_than">Greater Than</option>' +
+        '        <option value="less_than">Less Than</option>' +
+        '      </select>' +
+        '    </div>' +
+        '    <div id="gvm-next-value-row" class="gvm-row">' +
+        '      <input class="gvm-input" id="gvm-next-scan-value" placeholder="Enter value..." />' +
+        '    </div>' +
+        '  </div>' +
+        '  <div class="gvm-row">' +
+        '    <button class="gvm-btn gvm-btn-primary" id="gvm-first-scan" style="flex:1">First Scan</button>' +
+        '    <button class="gvm-btn gvm-btn-secondary" id="gvm-next-scan" style="flex:1" disabled>Next Scan</button>' +
+        '    <button class="gvm-btn gvm-btn-danger gvm-btn-sm" id="gvm-reset-scan">Reset</button>' +
+        '  </div>' +
+        '  <div class="gvm-status" id="gvm-scan-status">Ready to scan</div>' +
+        '</div>';
+      elements.valueType = container.querySelector('#gvm-value-type');
+      elements.scanType = container.querySelector('#gvm-scan-type');
+      elements.valueRow = container.querySelector('#gvm-value-row');
+      elements.scanValue = container.querySelector('#gvm-scan-value');
+      elements.rangeRow = container.querySelector('#gvm-range-row');
+      elements.rangeMin = container.querySelector('#gvm-range-min');
+      elements.rangeMax = container.querySelector('#gvm-range-max');
+      elements.nextScanTypeRow = container.querySelector('#gvm-next-scan-type-row');
+      elements.nextScanType = container.querySelector('#gvm-next-scan-type');
+      elements.nextValueRow = container.querySelector('#gvm-next-value-row');
+      elements.nextScanValue = container.querySelector('#gvm-next-scan-value');
+      elements.firstScanBtn = container.querySelector('#gvm-first-scan');
+      elements.nextScanBtn = container.querySelector('#gvm-next-scan');
+      elements.resetBtn = container.querySelector('#gvm-reset-scan');
+      elements.status = container.querySelector('#gvm-scan-status');
+      elements.scanType.addEventListener('change', function() {
+        var type = elements.scanType.value;
+        elements.valueRow.style.display = (type === 'range' || type === 'unknown') ? 'none' : 'flex';
+        elements.rangeRow.style.display = type === 'range' ? 'flex' : 'none';
+      });
+      elements.nextScanType.addEventListener('change', function() {
+        var type = elements.nextScanType.value;
+        var needsValue = (type === 'exact' || type === 'greater_than' || type === 'less_than');
+        elements.nextValueRow.style.display = needsValue ? 'flex' : 'none';
+      });
+      elements.firstScanBtn.addEventListener('click', function() {
+        var scanType = elements.scanType.value;
+        var value = elements.scanValue.value;
+        var options = { valueType: elements.valueType.value };
+        if (scanType === 'range') { options.min = elements.rangeMin.value; options.max = elements.rangeMax.value; }
+        elements.status.innerHTML = 'Scanning...';
+        elements.firstScanBtn.disabled = true;
+        setTimeout(function() {
+          try {
+            var count = scanner.firstScan(scanType, value, options);
+            elements.status.innerHTML = 'Found <span class="gvm-status-highlight">' + count + '</span> results';
+            elements.nextScanBtn.disabled = false;
+            elements.firstScanBtn.textContent = 'New Scan';
+            elements.nextScanTypeRow.style.display = 'block';
+            if (GVM.ui.resultsTab && GVM.ui.resultsTab.refresh) GVM.ui.resultsTab.refresh();
+          } catch (e) { elements.status.textContent = 'Error: ' + e.message; }
+          elements.firstScanBtn.disabled = false;
+        }, 50);
+      });
+      elements.nextScanBtn.addEventListener('click', function() {
+        var scanType = elements.nextScanType.value;
+        var value = elements.nextScanValue.value;
+        elements.status.innerHTML = 'Filtering...';
+        elements.nextScanBtn.disabled = true;
+        setTimeout(function() {
+          try {
+            var count = scanner.nextScan(scanType, value, {});
+            elements.status.innerHTML = 'Narrowed to <span class="gvm-status-highlight">' + count + '</span> results';
+            if (GVM.ui.resultsTab && GVM.ui.resultsTab.refresh) GVM.ui.resultsTab.refresh();
+          } catch (e) { elements.status.textContent = 'Error: ' + e.message; }
+          elements.nextScanBtn.disabled = false;
+        }, 50);
+      });
+      elements.resetBtn.addEventListener('click', function() {
+        valueStore.clearCandidates();
+        elements.firstScanBtn.textContent = 'First Scan';
+        elements.nextScanBtn.disabled = true;
+        elements.nextScanTypeRow.style.display = 'none';
+        elements.status.textContent = 'Ready to scan';
+        if (GVM.ui.resultsTab && GVM.ui.resultsTab.refresh) GVM.ui.resultsTab.refresh();
+      });
+    };
+    GVM.ui = GVM.ui || {};
+    GVM.ui.scanTab = scanTab;
+  })(window.GVM = window.GVM || {});
+
+  // ---- ui/results-tab.js ----
+  (function(GVM) {
+    'use strict';
+    var scanner = GVM.core.scanner;
+    var valueStore = GVM.core.valueStore;
+    var modifier = GVM.core.modifier;
+    var resultsTab = {};
+    var container = null;
+    var refreshTimer = null;
+    resultsTab.init = function(el) { container = el; resultsTab.refresh(); };
+    resultsTab.refresh = function() {
+      if (!container) return;
+      var candidates = valueStore.getCandidates();
+      if (candidates.length === 0) { container.innerHTML = '<div class="gvm-empty">No results yet. Run a scan first.</div>'; return; }
+      scanner.refreshValues();
+      var maxShow = 100;
+      var showing = Math.min(candidates.length, maxShow);
+      var html = '<div class="gvm-row" style="justify-content:space-between;margin-bottom:8px">' +
+        '<span class="gvm-label" style="margin:0">Results: <span class="gvm-status-highlight">' + candidates.length + '</span>' +
+        (candidates.length > maxShow ? ' (showing ' + maxShow + ')' : '') + '</span>' +
+        '<div><button class="gvm-btn gvm-btn-secondary gvm-btn-sm" id="gvm-refresh-results">Refresh</button> ' +
+        '<button class="gvm-btn gvm-btn-success gvm-btn-sm" id="gvm-modify-all">Set All</button></div></div>' +
+        '<div id="gvm-modify-all-row" class="gvm-row" style="display:none;margin-bottom:8px">' +
+        '<input class="gvm-input" id="gvm-modify-all-value" placeholder="New value for all..." />' +
+        '<button class="gvm-btn gvm-btn-primary gvm-btn-sm" id="gvm-modify-all-apply">Apply</button>' +
+        '<button class="gvm-btn gvm-btn-secondary gvm-btn-sm" id="gvm-modify-all-cancel">Cancel</button></div>' +
+        '<div class="gvm-results" id="gvm-results-list">';
+      for (var i = 0; i < showing; i++) {
+        var c = candidates[i];
+        var pathStr = c.path.join('.');
+        if (pathStr.length > 35) pathStr = '...' + pathStr.substring(pathStr.length - 32);
+        var valStr = String(c.lastValue);
+        if (valStr.length > 15) valStr = valStr.substring(0, 12) + '...';
+        html += '<div class="gvm-result-item" data-index="' + i + '">' +
+          '<span class="gvm-result-path" title="' + c.path.join('.') + '">' + pathStr + '</span>' +
+          '<span class="gvm-result-value">' + valStr + '</span>' +
+          '<input class="gvm-result-input" data-idx="' + i + '" value="' + c.lastValue + '" />' +
+          '<div class="gvm-result-actions">' +
+          '<button class="gvm-btn gvm-btn-primary gvm-btn-sm gvm-set-btn" data-idx="' + i + '">Set</button>' +
+          '<button class="gvm-btn gvm-btn-success gvm-btn-sm gvm-freeze-btn" data-idx="' + i + '">Freeze</button>' +
+          '</div></div>';
+      }
+      html += '</div>';
+      container.innerHTML = html;
+      container.querySelector('#gvm-refresh-results').addEventListener('click', function() { resultsTab.refresh(); });
+      var modifyAllBtn = container.querySelector('#gvm-modify-all');
+      var modifyAllRow = container.querySelector('#gvm-modify-all-row');
+      modifyAllBtn.addEventListener('click', function() { modifyAllRow.style.display = modifyAllRow.style.display === 'none' ? 'flex' : 'none'; });
+      container.querySelector('#gvm-modify-all-cancel').addEventListener('click', function() { modifyAllRow.style.display = 'none'; });
+      container.querySelector('#gvm-modify-all-apply').addEventListener('click', function() {
+        var newVal = container.querySelector('#gvm-modify-all-value').value;
+        for (var j = 0; j < candidates.length; j++) scanner.modifyValue(j, newVal);
+        modifyAllRow.style.display = 'none'; resultsTab.refresh();
+      });
+      var setBtns = container.querySelectorAll('.gvm-set-btn');
+      for (var si = 0; si < setBtns.length; si++) {
+        setBtns[si].addEventListener('click', function() {
+          var idx = parseInt(this.getAttribute('data-idx'));
+          var input = container.querySelector('.gvm-result-input[data-idx="' + idx + '"]');
+          if (input) { scanner.modifyValue(idx, input.value); resultsTab.refresh(); }
+        });
+      }
+      var freezeBtns = container.querySelectorAll('.gvm-freeze-btn');
+      for (var fi = 0; fi < freezeBtns.length; fi++) {
+        freezeBtns[fi].addEventListener('click', function() {
+          var idx = parseInt(this.getAttribute('data-idx'));
+          var input = container.querySelector('.gvm-result-input[data-idx="' + idx + '"]');
+          var c2 = candidates[idx];
+          if (c2 && input) {
+            var val = input.value;
+            if (typeof c2.lastValue === 'number') val = Number(val);
+            else if (typeof c2.lastValue === 'boolean') val = (val === 'true');
+            modifier.freeze(c2, val);
+            if (GVM.ui.frozenTab && GVM.ui.frozenTab.refresh) GVM.ui.frozenTab.refresh();
+          }
+        });
+      }
+      var inputs = container.querySelectorAll('.gvm-result-input');
+      for (var ii = 0; ii < inputs.length; ii++) {
+        inputs[ii].addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { var idx = parseInt(this.getAttribute('data-idx')); scanner.modifyValue(idx, this.value); resultsTab.refresh(); }
+        });
+      }
+    };
+    resultsTab.startAutoRefresh = function() {
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = setInterval(function() {
+        if (container && valueStore.getCandidates().length > 0 && valueStore.getCandidates().length <= 20) resultsTab.refresh();
+      }, 2000);
+    };
+    resultsTab.stopAutoRefresh = function() { if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; } };
+    GVM.ui = GVM.ui || {};
+    GVM.ui.resultsTab = resultsTab;
+  })(window.GVM = window.GVM || {});
+
+  // ---- ui/frozen-tab.js ----
+  (function(GVM) {
+    'use strict';
+    var valueStore = GVM.core.valueStore;
+    var modifier = GVM.core.modifier;
+    var frozenTab = {};
+    var container = null;
+    frozenTab.init = function(el) { container = el; frozenTab.refresh(); };
+    frozenTab.refresh = function() {
+      if (!container) return;
+      var frozen = valueStore.getFrozen();
+      if (frozen.length === 0) { container.innerHTML = '<div class="gvm-empty">No frozen values.<br>Use the Freeze button in Results to lock a value.</div>'; return; }
+      var html = '<div class="gvm-row" style="justify-content:space-between;margin-bottom:8px">' +
+        '<span class="gvm-label" style="margin:0">Frozen: <span class="gvm-status-highlight">' + frozen.length + '</span></span>' +
+        '<button class="gvm-btn gvm-btn-danger gvm-btn-sm" id="gvm-unfreeze-all">Unfreeze All</button></div>';
+      for (var i = 0; i < frozen.length; i++) {
+        var f = frozen[i];
+        var pathStr = f.pathStr;
+        if (pathStr.length > 30) pathStr = '...' + pathStr.substring(pathStr.length - 27);
+        html += '<div class="gvm-frozen-item">' +
+          '<span class="gvm-frozen-badge">FROZEN</span>' +
+          '<span class="gvm-frozen-path" title="' + f.pathStr + '">' + pathStr + '</span>' +
+          '<span class="gvm-frozen-value">' + f.value + '</span>' +
+          '<button class="gvm-btn gvm-btn-danger gvm-btn-sm gvm-unfreeze-btn" data-idx="' + i + '">Unfreeze</button></div>';
+      }
+      container.innerHTML = html;
+      var unfreezeAllBtn = container.querySelector('#gvm-unfreeze-all');
+      if (unfreezeAllBtn) unfreezeAllBtn.addEventListener('click', function() { modifier.unfreezeAll(); frozenTab.refresh(); });
+      var unfreezeBtns = container.querySelectorAll('.gvm-unfreeze-btn');
+      for (var ui = 0; ui < unfreezeBtns.length; ui++) {
+        unfreezeBtns[ui].addEventListener('click', function() { var idx = parseInt(this.getAttribute('data-idx')); modifier.unfreeze(idx); frozenTab.refresh(); });
+      }
+    };
+    GVM.ui = GVM.ui || {};
+    GVM.ui.frozenTab = frozenTab;
+  })(window.GVM = window.GVM || {});
+
+  // ---- ui/speed-tab.js ----
+  (function(GVM) {
+    'use strict';
+    var speedHack = GVM.core.speedHack;
+    var speedTab = {};
+    var container = null;
+    var elements = {};
+    speedTab.init = function(el) {
+      container = el;
+      container.innerHTML =
+        '<div>' +
+        '  <div class="gvm-speed-display" id="gvm-speed-value">1.0x</div>' +
+        '  <input type="range" class="gvm-speed-slider" id="gvm-speed-slider" min="0.1" max="10" step="0.1" value="1" />' +
+        '  <div class="gvm-row" style="justify-content:space-between;font-size:11px;color:#6a6a8a"><span>0.1x</span><span>1.0x</span><span>10x</span></div>' +
+        '  <div class="gvm-speed-presets">' +
+        '    <button class="gvm-btn gvm-btn-secondary gvm-btn-sm gvm-speed-preset" data-speed="0.25">0.25x</button>' +
+        '    <button class="gvm-btn gvm-btn-secondary gvm-btn-sm gvm-speed-preset" data-speed="0.5">0.5x</button>' +
+        '    <button class="gvm-btn gvm-btn-secondary gvm-btn-sm gvm-speed-preset" data-speed="1">1x</button>' +
+        '    <button class="gvm-btn gvm-btn-secondary gvm-btn-sm gvm-speed-preset" data-speed="2">2x</button>' +
+        '    <button class="gvm-btn gvm-btn-secondary gvm-btn-sm gvm-speed-preset" data-speed="3">3x</button>' +
+        '    <button class="gvm-btn gvm-btn-secondary gvm-btn-sm gvm-speed-preset" data-speed="5">5x</button>' +
+        '    <button class="gvm-btn gvm-btn-secondary gvm-btn-sm gvm-speed-preset" data-speed="10">10x</button>' +
+        '  </div>' +
+        '  <div class="gvm-row" style="margin-top:12px;justify-content:center;gap:8px">' +
+        '    <button class="gvm-btn gvm-btn-primary" id="gvm-speed-apply">Apply Speed</button>' +
+        '    <button class="gvm-btn gvm-btn-danger" id="gvm-speed-reset">Reset (1x)</button>' +
+        '  </div>' +
+        '  <div class="gvm-status" id="gvm-speed-status" style="margin-top:8px">Speed: Normal</div>' +
+        '  <div class="gvm-info" style="margin-top:8px">Modifies setTimeout, setInterval, requestAnimationFrame,<br>Date.now, and performance.now to scale game speed.</div>' +
+        '</div>';
+      elements.slider = container.querySelector('#gvm-speed-slider');
+      elements.display = container.querySelector('#gvm-speed-value');
+      elements.applyBtn = container.querySelector('#gvm-speed-apply');
+      elements.resetBtn = container.querySelector('#gvm-speed-reset');
+      elements.status = container.querySelector('#gvm-speed-status');
+      elements.slider.addEventListener('input', function() { elements.display.textContent = parseFloat(this.value).toFixed(1) + 'x'; });
+      elements.applyBtn.addEventListener('click', function() {
+        var m = parseFloat(elements.slider.value);
+        speedHack.activate(m);
+        elements.status.innerHTML = 'Speed: <span class="gvm-status-highlight">' + m.toFixed(1) + 'x</span> (Active)';
+      });
+      elements.resetBtn.addEventListener('click', function() { speedHack.deactivate(); elements.slider.value = 1; elements.display.textContent = '1.0x'; elements.status.textContent = 'Speed: Normal'; });
+      var presets = container.querySelectorAll('.gvm-speed-preset');
+      for (var i = 0; i < presets.length; i++) {
+        presets[i].addEventListener('click', function() { var s = parseFloat(this.getAttribute('data-speed')); elements.slider.value = s; elements.display.textContent = s.toFixed(1) + 'x'; });
+      }
+    };
+    GVM.ui = GVM.ui || {};
+    GVM.ui.speedTab = speedTab;
+  })(window.GVM = window.GVM || {});
+
+  // ---- ui/overlay.js ----
+  (function(GVM) {
+    'use strict';
+    var overlay = {};
+    var panel = null;
+    var shadowRoot = null;
+    overlay.init = function(cssText) {
+      var host = document.createElement('div');
+      host.id = 'gvm-root';
+      host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:2147483647;pointer-events:none;';
+      document.body.appendChild(host);
+      shadowRoot = host.attachShadow({ mode: 'open' });
+      var style = document.createElement('style');
+      style.textContent = cssText;
+      shadowRoot.appendChild(style);
+      panel = document.createElement('div');
+      panel.className = 'gvm-panel';
+      panel.style.pointerEvents = 'auto';
+      panel.innerHTML =
+        '<div class="gvm-titlebar" id="gvm-titlebar">' +
+        '  <span class="gvm-title">GVM ENGINE</span>' +
+        '  <div class="gvm-title-buttons">' +
+        '    <button class="gvm-title-btn" id="gvm-minimize" title="Minimize">_</button>' +
+        '    <button class="gvm-title-btn" id="gvm-close" title="Close">X</button>' +
+        '  </div>' +
+        '</div>' +
+        '<div class="gvm-body">' +
+        '  <div class="gvm-tabs">' +
+        '    <button class="gvm-tab active" data-tab="scan">Scan</button>' +
+        '    <button class="gvm-tab" data-tab="results">Results</button>' +
+        '    <button class="gvm-tab" data-tab="frozen">Frozen</button>' +
+        '    <button class="gvm-tab" data-tab="speed">Speed</button>' +
+        '  </div>' +
+        '  <div class="gvm-tab-content active" id="gvm-tab-scan"></div>' +
+        '  <div class="gvm-tab-content" id="gvm-tab-results"></div>' +
+        '  <div class="gvm-tab-content" id="gvm-tab-frozen"></div>' +
+        '  <div class="gvm-tab-content" id="gvm-tab-speed"></div>' +
+        '</div>';
+      shadowRoot.appendChild(panel);
+      // Setup tabs
+      var tabs = shadowRoot.querySelectorAll('.gvm-tab');
+      for (var i = 0; i < tabs.length; i++) {
+        tabs[i].addEventListener('click', function() {
+          var tabName = this.getAttribute('data-tab');
+          var allTabs = shadowRoot.querySelectorAll('.gvm-tab');
+          for (var j = 0; j < allTabs.length; j++) allTabs[j].classList.remove('active');
+          var allContents = shadowRoot.querySelectorAll('.gvm-tab-content');
+          for (var k = 0; k < allContents.length; k++) allContents[k].classList.remove('active');
+          this.classList.add('active');
+          shadowRoot.querySelector('#gvm-tab-' + tabName).classList.add('active');
+          if (tabName === 'results' && GVM.ui.resultsTab.refresh) GVM.ui.resultsTab.refresh();
+          else if (tabName === 'frozen' && GVM.ui.frozenTab.refresh) GVM.ui.frozenTab.refresh();
+        });
+      }
+      // Dragging
+      var titlebar = shadowRoot.querySelector('#gvm-titlebar');
+      var isDragging = false, startX, startY, startRight, startTop;
+      titlebar.addEventListener('mousedown', function(e) {
+        if (e.target.tagName === 'BUTTON') return;
+        isDragging = true; startX = e.clientX; startY = e.clientY;
+        var rect = panel.getBoundingClientRect();
+        startRight = window.innerWidth - rect.right; startTop = rect.top;
+        e.preventDefault();
+      });
+      document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+        panel.style.right = Math.max(0, startRight - (e.clientX - startX)) + 'px';
+        panel.style.top = Math.max(0, startTop + (e.clientY - startY)) + 'px';
+      });
+      document.addEventListener('mouseup', function() { isDragging = false; });
+      // Controls
+      shadowRoot.querySelector('#gvm-minimize').addEventListener('click', function() {
+        panel.classList.toggle('minimized');
+        this.textContent = panel.classList.contains('minimized') ? '+' : '_';
+      });
+      shadowRoot.querySelector('#gvm-close').addEventListener('click', function() {
+        var h = document.querySelector('#gvm-root');
+        if (h) h.remove();
+        GVM.ui.resultsTab.stopAutoRefresh();
+        window.__GVM_LOADED__ = false;
+      });
+      // Init tab contents
+      GVM.ui.scanTab.init(shadowRoot.querySelector('#gvm-tab-scan'));
+      GVM.ui.resultsTab.init(shadowRoot.querySelector('#gvm-tab-results'));
+      GVM.ui.frozenTab.init(shadowRoot.querySelector('#gvm-tab-frozen'));
+      GVM.ui.speedTab.init(shadowRoot.querySelector('#gvm-tab-speed'));
+      GVM.ui.resultsTab.startAutoRefresh();
+      // Stop events from reaching the game
+      ['mousedown','mouseup','click','keydown','keyup','keypress'].forEach(function(evt) {
+        panel.addEventListener(evt, function(e) { e.stopPropagation(); });
+      });
+    };
+    overlay.getPanel = function() { return panel; };
+    overlay.getShadowRoot = function() { return shadowRoot; };
+    GVM.ui = GVM.ui || {};
+    GVM.ui.overlay = overlay;
+  })(window.GVM = window.GVM || {});
+
+  // ---- main.js ----
+  (function(GVM) {
+    'use strict';
+    GVM.init = function(cssText) {
+      GVM.ui.overlay.init(cssText);
+      console.log('[GVM] Game Value Modifier loaded successfully.');
+    };
+  })(window.GVM = window.GVM || {});
+  </script>
+
+  <!-- ============================================================ -->
+  <!-- Load GVM button handler (CSS inlined, no fetch needed) -->
+  <!-- ============================================================ -->
+  <script>
+  document.getElementById('load-gvm').addEventListener('click', function() {
+    if (window.__GVM_LOADED__) {
+      console.log('[GVM] Already loaded.');
+      return;
+    }
+    window.__GVM_LOADED__ = true;
+
+    // CSS inlined directly - no fetch() needed, works on file:// protocol
+    var GVM_CSS = ':host { all: initial; font-family: "Segoe UI", Consolas, "Courier New", monospace; font-size: 13px; color: #e0e0e0; } * { box-sizing: border-box; margin: 0; padding: 0; } .gvm-panel { position: fixed; top: 10px; right: 10px; width: 380px; max-height: 85vh; background: #1a1a2e; border: 1px solid #16213e; border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6); z-index: 2147483647; display: flex; flex-direction: column; overflow: hidden; user-select: none; } .gvm-panel.minimized .gvm-body { display: none; } .gvm-panel.minimized { max-height: none; } .gvm-titlebar { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: linear-gradient(135deg, #0f3460, #16213e); cursor: move; border-bottom: 1px solid #0f3460; } .gvm-title { font-size: 13px; font-weight: bold; color: #e94560; letter-spacing: 1px; } .gvm-title-buttons { display: flex; gap: 6px; } .gvm-title-btn { width: 20px; height: 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; line-height: 20px; text-align: center; color: #e0e0e0; background: rgba(255, 255, 255, 0.1); transition: background 0.2s; } .gvm-title-btn:hover { background: rgba(255, 255, 255, 0.25); } .gvm-tabs { display: flex; background: #16213e; border-bottom: 1px solid #0f3460; } .gvm-tab { flex: 1; padding: 8px 4px; text-align: center; cursor: pointer; font-size: 11px; color: #8892a0; border: none; background: transparent; transition: all 0.2s; border-bottom: 2px solid transparent; } .gvm-tab:hover { color: #e0e0e0; background: rgba(255, 255, 255, 0.05); } .gvm-tab.active { color: #e94560; border-bottom-color: #e94560; background: rgba(233, 69, 96, 0.08); } .gvm-body { flex: 1; overflow-y: auto; max-height: calc(85vh - 80px); } .gvm-tab-content { display: none; padding: 12px; } .gvm-tab-content.active { display: block; } .gvm-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; } .gvm-label { font-size: 11px; color: #8892a0; margin-bottom: 4px; display: block; } .gvm-input { flex: 1; padding: 6px 8px; background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 4px; color: #e0e0e0; font-size: 12px; font-family: inherit; outline: none; transition: border-color 0.2s; } .gvm-input:focus { border-color: #e94560; } .gvm-select { padding: 6px 8px; background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 4px; color: #e0e0e0; font-size: 12px; font-family: inherit; outline: none; cursor: pointer; } .gvm-select:focus { border-color: #e94560; } .gvm-btn { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: inherit; font-weight: 600; transition: all 0.2s; white-space: nowrap; } .gvm-btn-primary { background: #e94560; color: #fff; } .gvm-btn-primary:hover { background: #ff6b81; } .gvm-btn-secondary { background: #2a2a4a; color: #e0e0e0; } .gvm-btn-secondary:hover { background: #3a3a5a; } .gvm-btn-danger { background: #c0392b; color: #fff; } .gvm-btn-danger:hover { background: #e74c3c; } .gvm-btn-success { background: #27ae60; color: #fff; } .gvm-btn-success:hover { background: #2ecc71; } .gvm-btn-sm { padding: 3px 8px; font-size: 11px; } .gvm-status { padding: 6px 12px; font-size: 11px; color: #8892a0; background: #0f0f1f; border-top: 1px solid #2a2a4a; text-align: center; } .gvm-status-highlight { color: #e94560; font-weight: bold; } .gvm-results { max-height: 300px; overflow-y: auto; border: 1px solid #2a2a4a; border-radius: 4px; background: #0a0a1a; } .gvm-result-item { display: flex; align-items: center; padding: 6px 8px; border-bottom: 1px solid #1a1a2e; gap: 8px; font-size: 11px; } .gvm-result-item:last-child { border-bottom: none; } .gvm-result-item:hover { background: rgba(233, 69, 96, 0.05); } .gvm-result-path { flex: 1; color: #6c9bd1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; } .gvm-result-value { width: 70px; text-align: right; color: #e94560; font-weight: bold; } .gvm-result-input { width: 70px; padding: 2px 4px; background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 3px; color: #e0e0e0; font-size: 11px; font-family: inherit; text-align: right; } .gvm-result-actions { display: flex; gap: 4px; } .gvm-frozen-item { display: flex; align-items: center; padding: 8px; margin-bottom: 6px; background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 4px; gap: 8px; } .gvm-frozen-path { flex: 1; color: #6c9bd1; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .gvm-frozen-value { color: #27ae60; font-weight: bold; font-size: 12px; } .gvm-frozen-badge { background: #27ae60; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: bold; letter-spacing: 0.5px; } .gvm-speed-display { text-align: center; padding: 16px 0; font-size: 32px; font-weight: bold; color: #e94560; } .gvm-speed-slider { width: 100%; margin: 12px 0; -webkit-appearance: none; appearance: none; height: 6px; background: #2a2a4a; border-radius: 3px; outline: none; } .gvm-speed-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #e94560; cursor: pointer; } .gvm-speed-presets { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-top: 8px; } .gvm-info { color: #6a6a8a; font-size: 11px; text-align: center; padding: 8px; line-height: 1.5; } .gvm-empty { text-align: center; padding: 24px 12px; color: #4a4a6a; font-size: 12px; } .gvm-results::-webkit-scrollbar, .gvm-body::-webkit-scrollbar { width: 6px; } .gvm-results::-webkit-scrollbar-track, .gvm-body::-webkit-scrollbar-track { background: #0a0a1a; } .gvm-results::-webkit-scrollbar-thumb, .gvm-body::-webkit-scrollbar-thumb { background: #2a2a4a; border-radius: 3px; } .gvm-results::-webkit-scrollbar-thumb:hover, .gvm-body::-webkit-scrollbar-thumb:hover { background: #3a3a5a; }';
+
+    try {
+      window.GVM.init(GVM_CSS);
+      console.log('[GVM] Panel injected successfully.');
+    } catch (e) {
+      console.error('[GVM] Failed to load:', e);
+      document.getElementById('gvm-load-error').style.display = 'block';
+      document.getElementById('gvm-load-error').textContent = 'Error loading GVM: ' + e.message;
+      window.__GVM_LOADED__ = false;
+    }
+
+    this.disabled = true;
+    this.textContent = 'GVM Loaded!';
+  });
   </script>
 </body>
 </html>

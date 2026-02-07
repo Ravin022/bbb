@@ -10,7 +10,7 @@
     // Create host element
     var host = document.createElement('div');
     host.id = 'gvm-root';
-    host.style.cssText = 'all:initial;position:fixed;top:0;left:0;width:0;height:0;z-index:2147483647;';
+    host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:2147483647;pointer-events:none;';
     document.body.appendChild(host);
 
     // Attach Shadow DOM
@@ -24,6 +24,7 @@
     // Build panel
     panel = document.createElement('div');
     panel.className = 'gvm-panel';
+    panel.style.pointerEvents = 'auto';
     panel.innerHTML = [
       '<div class="gvm-titlebar" id="gvm-titlebar">',
       '  <span class="gvm-title">GVM ENGINE</span>',
