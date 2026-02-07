@@ -65,7 +65,6 @@
 
     // Stop events from reaching the game
     panel.addEventListener('mousedown', function(e) { e.stopPropagation(); });
-    panel.addEventListener('mouseup', function(e) { e.stopPropagation(); });
     panel.addEventListener('click', function(e) { e.stopPropagation(); });
     panel.addEventListener('keydown', function(e) { e.stopPropagation(); });
     panel.addEventListener('keyup', function(e) { e.stopPropagation(); });
@@ -118,17 +117,18 @@
       e.preventDefault();
     });
 
-    document.addEventListener('mousemove', function(e) {
+    window.addEventListener('mousemove', function(e) {
       if (!isDragging) return;
+      e.preventDefault();
       var dx = e.clientX - startX;
       var dy = e.clientY - startY;
       panel.style.right = Math.max(0, startRight - dx) + 'px';
       panel.style.top = Math.max(0, startTop + dy) + 'px';
-    });
+    }, true);
 
-    document.addEventListener('mouseup', function() {
+    window.addEventListener('mouseup', function() {
       isDragging = false;
-    });
+    }, true);
   }
 
   function setupControls() {

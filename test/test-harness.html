@@ -776,6 +776,7 @@
     var resultsTab = {};
     var container = null;
     var refreshTimer = null;
+    var inputFocused = false;
     resultsTab.init = function(el) { container = el; resultsTab.refresh(); };
     resultsTab.refresh = function() {
       if (!container) return;
@@ -846,14 +847,17 @@
       }
       var inputs = container.querySelectorAll('.gvm-result-input');
       for (var ii = 0; ii < inputs.length; ii++) {
+        inputs[ii].addEventListener('focus', function() { inputFocused = true; });
+        inputs[ii].addEventListener('blur', function() { inputFocused = false; });
         inputs[ii].addEventListener('keydown', function(e) {
-          if (e.key === 'Enter') { var idx = parseInt(this.getAttribute('data-idx')); scanner.modifyValue(idx, this.value); resultsTab.refresh(); }
+          if (e.key === 'Enter') { var idx = parseInt(this.getAttribute('data-idx')); scanner.modifyValue(idx, this.value); inputFocused = false; resultsTab.refresh(); }
         });
       }
     };
     resultsTab.startAutoRefresh = function() {
       if (refreshTimer) clearInterval(refreshTimer);
       refreshTimer = setInterval(function() {
+        if (inputFocused) return;
         if (container && valueStore.getCandidates().length > 0 && valueStore.getCandidates().length <= 20) resultsTab.refresh();
       }, 2000);
     };
@@ -1014,12 +1018,13 @@
         startRight = window.innerWidth - rect.right; startTop = rect.top;
         e.preventDefault();
       });
-      document.addEventListener('mousemove', function(e) {
+      window.addEventListener('mousemove', function(e) {
         if (!isDragging) return;
+        e.preventDefault();
         panel.style.right = Math.max(0, startRight - (e.clientX - startX)) + 'px';
         panel.style.top = Math.max(0, startTop + (e.clientY - startY)) + 'px';
-      });
-      document.addEventListener('mouseup', function() { isDragging = false; });
+      }, true);
+      window.addEventListener('mouseup', function() { isDragging = false; }, true);
       // Controls
       shadowRoot.querySelector('#gvm-minimize').addEventListener('click', function() {
         panel.classList.toggle('minimized');
@@ -1038,7 +1043,7 @@
       GVM.ui.speedTab.init(shadowRoot.querySelector('#gvm-tab-speed'));
       GVM.ui.resultsTab.startAutoRefresh();
       // Stop events from reaching the game
-      ['mousedown','mouseup','click','keydown','keyup','keypress'].forEach(function(evt) {
+      ['mousedown','click','keydown','keyup','keypress'].forEach(function(evt) {
         panel.addEventListener(evt, function(e) { e.stopPropagation(); });
       });
     };

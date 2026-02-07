@@ -959,6 +959,7 @@
   var resultsTab = {};
   var container = null;
   var refreshTimer = null;
+  var inputFocused = false;
 
   resultsTab.init = function(el) {
     container = el;
@@ -1082,13 +1083,16 @@
       });
     }
 
-    // Enter key on inputs triggers set
+    // Enter key on inputs triggers set, focus tracking prevents auto-refresh
     var inputs = container.querySelectorAll('.gvm-result-input');
     for (var ii = 0; ii < inputs.length; ii++) {
+      inputs[ii].addEventListener('focus', function() { inputFocused = true; });
+      inputs[ii].addEventListener('blur', function() { inputFocused = false; });
       inputs[ii].addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
           var idx = parseInt(this.getAttribute('data-idx'));
           scanner.modifyValue(idx, this.value);
+          inputFocused = false;
           resultsTab.refresh();
         }
       });
@@ -1099,6 +1103,7 @@
   resultsTab.startAutoRefresh = function() {
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = setInterval(function() {
+      if (inputFocused) return;
       if (container && valueStore.getCandidates().length > 0 &&
           valueStore.getCandidates().length <= 20) {
         resultsTab.refresh();
@@ -1357,7 +1362,6 @@
 
     // Stop events from reaching the game
     panel.addEventListener('mousedown', function(e) { e.stopPropagation(); });
-    panel.addEventListener('mouseup', function(e) { e.stopPropagation(); });
     panel.addEventListener('click', function(e) { e.stopPropagation(); });
     panel.addEventListener('keydown', function(e) { e.stopPropagation(); });
     panel.addEventListener('keyup', function(e) { e.stopPropagation(); });
@@ -1410,17 +1414,18 @@
       e.preventDefault();
     });
 
-    document.addEventListener('mousemove', function(e) {
+    window.addEventListener('mousemove', function(e) {
       if (!isDragging) return;
+      e.preventDefault();
       var dx = e.clientX - startX;
       var dy = e.clientY - startY;
       panel.style.right = Math.max(0, startRight - dx) + 'px';
       panel.style.top = Math.max(0, startTop + dy) + 'px';
-    });
+    }, true);
 
-    document.addEventListener('mouseup', function() {
+    window.addEventListener('mouseup', function() {
       isDragging = false;
-    });
+    }, true);
   }
 
   function setupControls() {
