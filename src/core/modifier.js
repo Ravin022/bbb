@@ -2,6 +2,7 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var valueStore = GVM.core.valueStore;
   var safeTraverse = GVM.utils.safeTraverse;
   var iframeAccess = GVM.utils.iframeAccess;
@@ -26,23 +27,34 @@
 
     if (parentResult.ok && parentResult.value) {
       var parent = parentResult.value;
-      try {
-        originalDescriptor = Object.getOwnPropertyDescriptor(parent, key);
-        Object.defineProperty(parent, key, {
-          get: function() { return value; },
-          set: function() { /* blocked */ },
-          configurable: true,
-          enumerable: originalDescriptor ? originalDescriptor.enumerable : true
-        });
-        frozen = true;
-      } catch (e) {
-        // defineProperty failed, fall back to polling
+
+      // Skip if the object itself is frozen
+      if (N.isFrozen(parent)) {
+        // Can't defineProperty on frozen object, use polling
+      } else {
+        try {
+          originalDescriptor = N.getOwnPropertyDescriptor(parent, key);
+          // Check if property is non-configurable
+          if (originalDescriptor && !originalDescriptor.configurable) {
+            // Can't redefine non-configurable property, use polling
+          } else {
+            N.defineProperty(parent, key, {
+              get: function() { return value; },
+              set: function() { /* blocked */ },
+              configurable: true,
+              enumerable: originalDescriptor ? originalDescriptor.enumerable : true
+            });
+            frozen = true;
+          }
+        } catch (e) {
+          // defineProperty failed, fall back to polling
+        }
       }
     }
 
     if (!frozen) {
-      // Polling fallback - write value every 50ms
-      intervalId = setInterval(function() {
+      // Polling fallback - write value every 50ms using cached setInterval
+      intervalId = N.setInterval(function() {
         safeTraverse.setByPath(root.win, candidate.path, value);
       }, 50);
     }
@@ -79,7 +91,7 @@
         var parentResult = safeTraverse.getByPath(root.win, parentPath);
         if (parentResult.ok && parentResult.value) {
           try {
-            Object.defineProperty(parentResult.value, key, entry.originalDescriptor);
+            N.defineProperty(parentResult.value, key, entry.originalDescriptor);
           } catch (e) {
             // Best effort
           }

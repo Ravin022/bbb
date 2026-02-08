@@ -2,6 +2,7 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var safeTraverse = {};
 
   safeTraverse.safeGet = function(obj, key) {
@@ -14,6 +15,11 @@
 
   safeTraverse.safeSet = function(obj, key, value) {
     try {
+      // Check if object is frozen or sealed before attempting write
+      if (N.isFrozen(obj) || N.isSealed(obj)) {
+        // For sealed objects, existing props can be modified but not for frozen
+        if (N.isFrozen(obj)) return false;
+      }
       obj[key] = value;
       return true;
     } catch (e) {
@@ -23,7 +29,7 @@
 
   safeTraverse.safeKeys = function(obj) {
     try {
-      return Object.keys(obj);
+      return N.keys(obj);
     } catch (e) {
       return [];
     }

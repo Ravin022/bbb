@@ -2,30 +2,31 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var overlay = {};
   var panel = null;
   var shadowRoot = null;
 
   overlay.init = function(cssText) {
-    // Create host element
-    var host = document.createElement('div');
+    // Create host element using cached native DOM methods
+    var host = N.createElement('div');
     host.id = 'gvm-root';
     host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:2147483647;pointer-events:none;';
-    document.body.appendChild(host);
+    N.bodyAppendChild(host);
 
-    // Attach Shadow DOM
-    shadowRoot = host.attachShadow({ mode: 'open' });
+    // Attach Shadow DOM using cached native
+    shadowRoot = N.attachShadow(host, { mode: 'open' });
 
     // Inject styles
-    var style = document.createElement('style');
+    var style = N.createElement('style');
     style.textContent = cssText;
-    shadowRoot.appendChild(style);
+    N.appendChild(shadowRoot, style);
 
     // Build panel
-    panel = document.createElement('div');
+    panel = N.createElement('div');
     panel.className = 'gvm-panel';
     panel.style.pointerEvents = 'auto';
-    panel.innerHTML = [
+    N.setInnerHTML(panel, [
       '<div class="gvm-titlebar" id="gvm-titlebar">',
       '  <span class="gvm-title">GVM ENGINE</span>',
       '  <div class="gvm-title-buttons">',
@@ -45,9 +46,9 @@
       '  <div class="gvm-tab-content" id="gvm-tab-frozen"></div>',
       '  <div class="gvm-tab-content" id="gvm-tab-speed"></div>',
       '</div>'
-    ].join('\n');
+    ].join('\n'));
 
-    shadowRoot.appendChild(panel);
+    N.appendChild(shadowRoot, panel);
 
     // Init tabs
     setupTabs();
@@ -64,18 +65,17 @@
     GVM.ui.resultsTab.startAutoRefresh();
 
     // Stop events from reaching the game
-    panel.addEventListener('mousedown', function(e) { e.stopPropagation(); });
-    panel.addEventListener('click', function(e) { e.stopPropagation(); });
-    panel.addEventListener('keydown', function(e) { e.stopPropagation(); });
-    panel.addEventListener('keyup', function(e) { e.stopPropagation(); });
-    panel.addEventListener('keypress', function(e) { e.stopPropagation(); });
+    var stopEvents = ['mousedown', 'click', 'keydown', 'keyup', 'keypress'];
+    for (var ei = 0; ei < stopEvents.length; ei++) {
+      N.addEventListener(panel, stopEvents[ei], function(e) { e.stopPropagation(); });
+    }
   };
 
   function setupTabs() {
     var tabs = shadowRoot.querySelectorAll('.gvm-tab');
     for (var i = 0; i < tabs.length; i++) {
-      tabs[i].addEventListener('click', function() {
-        var tabName = this.getAttribute('data-tab');
+      N.addEventListener(tabs[i], 'click', function() {
+        var tabName = N.getAttribute(this, 'data-tab');
 
         // Deactivate all
         var allTabs = shadowRoot.querySelectorAll('.gvm-tab');
@@ -106,7 +106,7 @@
     var isDragging = false;
     var startX, startY, startRight, startTop;
 
-    titlebar.addEventListener('mousedown', function(e) {
+    N.addEventListener(titlebar, 'mousedown', function(e) {
       if (e.target.tagName === 'BUTTON') return;
       isDragging = true;
       startX = e.clientX;
@@ -117,7 +117,7 @@
       e.preventDefault();
     });
 
-    window.addEventListener('mousemove', function(e) {
+    N.addEventListener(window, 'mousemove', function(e) {
       if (!isDragging) return;
       e.preventDefault();
       var dx = e.clientX - startX;
@@ -126,20 +126,20 @@
       panel.style.top = Math.max(0, startTop + dy) + 'px';
     }, true);
 
-    window.addEventListener('mouseup', function() {
+    N.addEventListener(window, 'mouseup', function() {
       isDragging = false;
     }, true);
   }
 
   function setupControls() {
-    shadowRoot.querySelector('#gvm-minimize').addEventListener('click', function() {
+    N.addEventListener(shadowRoot.querySelector('#gvm-minimize'), 'click', function() {
       panel.classList.toggle('minimized');
       this.textContent = panel.classList.contains('minimized') ? '+' : '_';
     });
 
-    shadowRoot.querySelector('#gvm-close').addEventListener('click', function() {
-      var host = document.querySelector('#gvm-root');
-      if (host) host.remove();
+    N.addEventListener(shadowRoot.querySelector('#gvm-close'), 'click', function() {
+      var host = N.querySelector('#gvm-root');
+      if (host) N.remove(host);
       GVM.ui.resultsTab.stopAutoRefresh();
       window.__GVM_LOADED__ = false;
     });

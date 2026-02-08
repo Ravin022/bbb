@@ -18,6 +18,7 @@ CSS_CONTENT=$(cat "$CSS_FILE" | tr '\n' ' ' | sed "s/'/\\\\'/g")
 
 # Concatenation order (dependency order)
 FILES=(
+  "$SRC_DIR/utils/natives.js"
   "$SRC_DIR/utils/type-checks.js"
   "$SRC_DIR/utils/safe-traverse.js"
   "$SRC_DIR/utils/iframe-access.js"

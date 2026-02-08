@@ -2,18 +2,20 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var valueStore = GVM.core.valueStore;
   var speedHack = {};
 
+  // Use cached native references as originals so we always have clean copies
   var originals = {
-    setTimeout: null,
-    setInterval: null,
-    clearTimeout: null,
-    clearInterval: null,
-    requestAnimationFrame: null,
-    cancelAnimationFrame: null,
-    dateNow: null,
-    perfNow: null
+    setTimeout: N.setTimeout,
+    setInterval: N.setInterval,
+    clearTimeout: N.clearTimeout,
+    clearInterval: N.clearInterval,
+    requestAnimationFrame: N.requestAnimationFrame,
+    cancelAnimationFrame: N.cancelAnimationFrame,
+    dateNow: N.dateNow,
+    perfNow: N.perfNow
   };
 
   var active = false;
@@ -29,7 +31,7 @@
   };
 
   function getFakeTime() {
-    var realNow = originals.perfNow ? originals.perfNow.call(performance) : Date.now();
+    var realNow = originals.perfNow();
     var elapsed = realNow - baseRealTime;
     return baseFakeTime + elapsed * valueStore.getSpeedMultiplier();
   }
@@ -38,43 +40,38 @@
     if (active) {
       // Update multiplier without resetting time base
       baseFakeTime = getFakeTime();
-      baseRealTime = originals.perfNow ? originals.perfNow.call(performance) : Date.now();
+      baseRealTime = originals.perfNow();
       valueStore.setSpeedMultiplier(multiplier);
       return;
     }
-
-    // Store originals
-    originals.setTimeout = window.setTimeout.bind(window);
-    originals.setInterval = window.setInterval.bind(window);
-    originals.clearTimeout = window.clearTimeout.bind(window);
-    originals.clearInterval = window.clearInterval.bind(window);
-    originals.requestAnimationFrame = window.requestAnimationFrame.bind(window);
-    originals.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
-    originals.dateNow = Date.now;
-    originals.perfNow = performance.now.bind(performance);
 
     baseRealTime = originals.perfNow();
     baseFakeTime = baseRealTime;
     valueStore.setSpeedMultiplier(multiplier);
     active = true;
 
-    // Override setTimeout
+    // Override setTimeout - NO eval, string callbacks pass through to original
     window.setTimeout = function(fn, delay) {
-      var args = Array.prototype.slice.call(arguments, 2);
+      if (typeof fn !== 'function') {
+        // Pass string callbacks to the original unmodified (avoids eval/CSP issues)
+        return originals.setTimeout.apply(null, arguments);
+      }
+      var args = N.arraySlice.call(arguments, 2);
       var scaledDelay = Math.max(1, Math.round((delay || 0) / valueStore.getSpeedMultiplier()));
       return originals.setTimeout(function() {
-        if (typeof fn === 'function') fn.apply(null, args);
-        else if (typeof fn === 'string') eval(fn);
+        fn.apply(null, args);
       }, scaledDelay);
     };
 
-    // Override setInterval
+    // Override setInterval - NO eval, string callbacks pass through to original
     window.setInterval = function(fn, delay) {
-      var args = Array.prototype.slice.call(arguments, 2);
+      if (typeof fn !== 'function') {
+        return originals.setInterval.apply(null, arguments);
+      }
+      var args = N.arraySlice.call(arguments, 2);
       var scaledDelay = Math.max(1, Math.round((delay || 0) / valueStore.getSpeedMultiplier()));
       return originals.setInterval(function() {
-        if (typeof fn === 'function') fn.apply(null, args);
-        else if (typeof fn === 'string') eval(fn);
+        fn.apply(null, args);
       }, scaledDelay);
     };
 

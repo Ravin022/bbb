@@ -2,6 +2,7 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var typeChecks = GVM.utils.typeChecks;
   var safeTraverse = GVM.utils.safeTraverse;
 
@@ -33,7 +34,7 @@
     options = options || {};
     var maxDepth = options.maxDepth || 7;
     var maxResults = options.maxResults || 50000;
-    var visited = new WeakSet();
+    var visited = new N.WeakSet();
     var resultCount = 0;
 
     var queue = [{ obj: root, path: [], depth: 0 }];
@@ -56,13 +57,13 @@
 
       var keys = safeTraverse.safeKeys(obj);
       // For arrays, also check indexed access
-      if (Array.isArray(obj)) {
+      if (N.isArray(obj)) {
         for (var ai = 0; ai < Math.min(obj.length, 1000); ai++) {
           keys.push(String(ai));
         }
         // Deduplicate
         var seen = {};
-        keys = keys.filter(function(k) {
+        keys = N.arrayFilter.call(keys, function(k) {
           if (seen[k]) return false;
           seen[k] = true;
           return true;

@@ -2,6 +2,7 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var typeChecks = {};
 
   typeChecks.isNumber = function(val) {
@@ -22,13 +23,13 @@
 
   typeChecks.isPlainObject = function(val) {
     if (!val || typeof val !== 'object') return false;
-    if (Array.isArray(val)) return true;
+    if (N.isArray(val)) return true;
     // Skip DOM nodes
     if (val.nodeType) return false;
     // Skip Window objects (but allow the root window scan)
     if (val.window === val && val.document) return false;
     // Skip typed arrays, ArrayBuffers, WebGL contexts, etc.
-    var tag = Object.prototype.toString.call(val);
+    var tag = N.toString.call(val);
     if (tag.indexOf('Array') > -1 && tag !== '[object Array]') return false;
     if (tag === '[object ArrayBuffer]') return false;
     if (tag === '[object WebGLRenderingContext]') return false;

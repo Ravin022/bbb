@@ -1,11 +1,140 @@
 (function() {
 'use strict';
 
+// === natives.js ===
+// GVM.natives - Cache native function references before page scripts can tamper with them
+// This MUST be the first module loaded
+(function(GVM) {
+  'use strict';
+
+  var natives = {};
+
+  // Object methods
+  natives.defineProperty = Object.defineProperty;
+  natives.getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+  natives.keys = Object.keys;
+  natives.freeze = Object.freeze;
+  natives.isFrozen = Object.isFrozen;
+  natives.isSealed = Object.isSealed;
+  natives.getPrototypeOf = Object.getPrototypeOf;
+  natives.hasOwnProperty = Object.prototype.hasOwnProperty;
+  natives.toString = Object.prototype.toString;
+
+  // Array methods
+  natives.isArray = Array.isArray;
+  natives.arraySlice = Array.prototype.slice;
+  natives.arrayFilter = Array.prototype.filter;
+  natives.arrayForEach = Array.prototype.forEach;
+
+  // DOM methods - cached from prototypes so they can't be overridden per-instance
+  natives.createElement = document.createElement.bind(document);
+  natives.createTextNode = document.createTextNode.bind(document);
+  natives.querySelector = document.querySelector.bind(document);
+  natives.querySelectorAll = document.querySelectorAll.bind(document);
+  natives.getElementById = document.getElementById.bind(document);
+  natives.bodyAppendChild = function(el) {
+    return HTMLElement.prototype.appendChild.call(document.body, el);
+  };
+  natives.appendChild = function(parent, child) {
+    return HTMLElement.prototype.appendChild.call(parent, child);
+  };
+  natives.removeChild = function(parent, child) {
+    return HTMLElement.prototype.removeChild.call(parent, child);
+  };
+  natives.remove = function(el) {
+    if (el && el.parentNode) {
+      HTMLElement.prototype.removeChild.call(el.parentNode, el);
+    }
+  };
+  natives.attachShadow = function(el, opts) {
+    return Element.prototype.attachShadow.call(el, opts);
+  };
+  natives.setAttribute = function(el, name, value) {
+    return Element.prototype.setAttribute.call(el, name, value);
+  };
+  natives.getAttribute = function(el, name) {
+    return Element.prototype.getAttribute.call(el, name);
+  };
+  natives.addEventListener = function(target, type, fn, opts) {
+    return EventTarget.prototype.addEventListener.call(target, type, fn, opts);
+  };
+  natives.querySelectorOn = function(el, selector) {
+    return Element.prototype.querySelectorAll.call(el, selector);
+  };
+  natives.querySelectorOneOn = function(el, selector) {
+    return Element.prototype.querySelector.call(el, selector);
+  };
+
+  // Timer functions
+  natives.setTimeout = window.setTimeout.bind(window);
+  natives.setInterval = window.setInterval.bind(window);
+  natives.clearTimeout = window.clearTimeout.bind(window);
+  natives.clearInterval = window.clearInterval.bind(window);
+  natives.requestAnimationFrame = window.requestAnimationFrame.bind(window);
+  natives.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+
+  // Time functions
+  natives.dateNow = Date.now;
+  natives.perfNow = performance.now.bind(performance);
+
+  // WeakSet/WeakMap
+  natives.WeakSet = WeakSet;
+  natives.WeakMap = WeakMap;
+
+  // Console
+  natives.consoleLog = console.log.bind(console);
+  natives.consoleError = console.error.bind(console);
+
+  // Safe innerHTML setter that handles Trusted Types
+  natives._trustedPolicy = null;
+  natives._trustedPolicyInit = false;
+
+  natives.setInnerHTML = function(el, html) {
+    // Try Trusted Types if available and required
+    if (!natives._trustedPolicyInit) {
+      natives._trustedPolicyInit = true;
+      try {
+        if (window.trustedTypes && window.trustedTypes.createPolicy) {
+          natives._trustedPolicy = window.trustedTypes.createPolicy('gvm-engine', {
+            createHTML: function(s) { return s; }
+          });
+        }
+      } catch (e) {
+        // Trusted Types policy creation failed, fall back
+      }
+    }
+
+    try {
+      if (natives._trustedPolicy) {
+        el.innerHTML = natives._trustedPolicy.createHTML(html);
+      } else {
+        el.innerHTML = html;
+      }
+    } catch (e) {
+      // Final fallback: build via DOM parsing
+      try {
+        var template = natives.createElement('template');
+        template.innerHTML = html;
+        while (el.firstChild) el.removeChild(el.firstChild);
+        natives.appendChild(el, template.content.cloneNode(true));
+      } catch (e2) {
+        // Last resort: textContent (loses HTML formatting)
+        el.textContent = html.replace(/<[^>]*>/g, '');
+      }
+    }
+  };
+
+  GVM.natives = natives;
+
+})(window.GVM = window.GVM || {});
+
+
 // === type-checks.js ===
 // GVM.utils.typeChecks - Type checking helpers
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var typeChecks = {};
 
   typeChecks.isNumber = function(val) {
@@ -26,13 +155,13 @@
 
   typeChecks.isPlainObject = function(val) {
     if (!val || typeof val !== 'object') return false;
-    if (Array.isArray(val)) return true;
+    if (N.isArray(val)) return true;
     // Skip DOM nodes
     if (val.nodeType) return false;
     // Skip Window objects (but allow the root window scan)
     if (val.window === val && val.document) return false;
     // Skip typed arrays, ArrayBuffers, WebGL contexts, etc.
-    var tag = Object.prototype.toString.call(val);
+    var tag = N.toString.call(val);
     if (tag.indexOf('Array') > -1 && tag !== '[object Array]') return false;
     if (tag === '[object ArrayBuffer]') return false;
     if (tag === '[object WebGLRenderingContext]') return false;
@@ -52,6 +181,7 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var safeTraverse = {};
 
   safeTraverse.safeGet = function(obj, key) {
@@ -64,6 +194,11 @@
 
   safeTraverse.safeSet = function(obj, key, value) {
     try {
+      // Check if object is frozen or sealed before attempting write
+      if (N.isFrozen(obj) || N.isSealed(obj)) {
+        // For sealed objects, existing props can be modified but not for frozen
+        if (N.isFrozen(obj)) return false;
+      }
       obj[key] = value;
       return true;
     } catch (e) {
@@ -73,7 +208,7 @@
 
   safeTraverse.safeKeys = function(obj) {
     try {
-      return Object.keys(obj);
+      return N.keys(obj);
     } catch (e) {
       return [];
     }
@@ -143,6 +278,7 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var typeChecks = GVM.utils.typeChecks;
   var safeTraverse = GVM.utils.safeTraverse;
 
@@ -174,7 +310,7 @@
     options = options || {};
     var maxDepth = options.maxDepth || 7;
     var maxResults = options.maxResults || 50000;
-    var visited = new WeakSet();
+    var visited = new N.WeakSet();
     var resultCount = 0;
 
     var queue = [{ obj: root, path: [], depth: 0 }];
@@ -197,13 +333,13 @@
 
       var keys = safeTraverse.safeKeys(obj);
       // For arrays, also check indexed access
-      if (Array.isArray(obj)) {
+      if (N.isArray(obj)) {
         for (var ai = 0; ai < Math.min(obj.length, 1000); ai++) {
           keys.push(String(ai));
         }
         // Deduplicate
         var seen = {};
-        keys = keys.filter(function(k) {
+        keys = N.arrayFilter.call(keys, function(k) {
           if (seen[k]) return false;
           seen[k] = true;
           return true;
@@ -535,6 +671,7 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var valueStore = GVM.core.valueStore;
   var safeTraverse = GVM.utils.safeTraverse;
   var iframeAccess = GVM.utils.iframeAccess;
@@ -559,23 +696,34 @@
 
     if (parentResult.ok && parentResult.value) {
       var parent = parentResult.value;
-      try {
-        originalDescriptor = Object.getOwnPropertyDescriptor(parent, key);
-        Object.defineProperty(parent, key, {
-          get: function() { return value; },
-          set: function() { /* blocked */ },
-          configurable: true,
-          enumerable: originalDescriptor ? originalDescriptor.enumerable : true
-        });
-        frozen = true;
-      } catch (e) {
-        // defineProperty failed, fall back to polling
+
+      // Skip if the object itself is frozen
+      if (N.isFrozen(parent)) {
+        // Can't defineProperty on frozen object, use polling
+      } else {
+        try {
+          originalDescriptor = N.getOwnPropertyDescriptor(parent, key);
+          // Check if property is non-configurable
+          if (originalDescriptor && !originalDescriptor.configurable) {
+            // Can't redefine non-configurable property, use polling
+          } else {
+            N.defineProperty(parent, key, {
+              get: function() { return value; },
+              set: function() { /* blocked */ },
+              configurable: true,
+              enumerable: originalDescriptor ? originalDescriptor.enumerable : true
+            });
+            frozen = true;
+          }
+        } catch (e) {
+          // defineProperty failed, fall back to polling
+        }
       }
     }
 
     if (!frozen) {
-      // Polling fallback - write value every 50ms
-      intervalId = setInterval(function() {
+      // Polling fallback - write value every 50ms using cached setInterval
+      intervalId = N.setInterval(function() {
         safeTraverse.setByPath(root.win, candidate.path, value);
       }, 50);
     }
@@ -612,7 +760,7 @@
         var parentResult = safeTraverse.getByPath(root.win, parentPath);
         if (parentResult.ok && parentResult.value) {
           try {
-            Object.defineProperty(parentResult.value, key, entry.originalDescriptor);
+            N.defineProperty(parentResult.value, key, entry.originalDescriptor);
           } catch (e) {
             // Best effort
           }
@@ -646,18 +794,20 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var valueStore = GVM.core.valueStore;
   var speedHack = {};
 
+  // Use cached native references as originals so we always have clean copies
   var originals = {
-    setTimeout: null,
-    setInterval: null,
-    clearTimeout: null,
-    clearInterval: null,
-    requestAnimationFrame: null,
-    cancelAnimationFrame: null,
-    dateNow: null,
-    perfNow: null
+    setTimeout: N.setTimeout,
+    setInterval: N.setInterval,
+    clearTimeout: N.clearTimeout,
+    clearInterval: N.clearInterval,
+    requestAnimationFrame: N.requestAnimationFrame,
+    cancelAnimationFrame: N.cancelAnimationFrame,
+    dateNow: N.dateNow,
+    perfNow: N.perfNow
   };
 
   var active = false;
@@ -673,7 +823,7 @@
   };
 
   function getFakeTime() {
-    var realNow = originals.perfNow ? originals.perfNow.call(performance) : Date.now();
+    var realNow = originals.perfNow();
     var elapsed = realNow - baseRealTime;
     return baseFakeTime + elapsed * valueStore.getSpeedMultiplier();
   }
@@ -682,43 +832,38 @@
     if (active) {
       // Update multiplier without resetting time base
       baseFakeTime = getFakeTime();
-      baseRealTime = originals.perfNow ? originals.perfNow.call(performance) : Date.now();
+      baseRealTime = originals.perfNow();
       valueStore.setSpeedMultiplier(multiplier);
       return;
     }
-
-    // Store originals
-    originals.setTimeout = window.setTimeout.bind(window);
-    originals.setInterval = window.setInterval.bind(window);
-    originals.clearTimeout = window.clearTimeout.bind(window);
-    originals.clearInterval = window.clearInterval.bind(window);
-    originals.requestAnimationFrame = window.requestAnimationFrame.bind(window);
-    originals.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
-    originals.dateNow = Date.now;
-    originals.perfNow = performance.now.bind(performance);
 
     baseRealTime = originals.perfNow();
     baseFakeTime = baseRealTime;
     valueStore.setSpeedMultiplier(multiplier);
     active = true;
 
-    // Override setTimeout
+    // Override setTimeout - NO eval, string callbacks pass through to original
     window.setTimeout = function(fn, delay) {
-      var args = Array.prototype.slice.call(arguments, 2);
+      if (typeof fn !== 'function') {
+        // Pass string callbacks to the original unmodified (avoids eval/CSP issues)
+        return originals.setTimeout.apply(null, arguments);
+      }
+      var args = N.arraySlice.call(arguments, 2);
       var scaledDelay = Math.max(1, Math.round((delay || 0) / valueStore.getSpeedMultiplier()));
       return originals.setTimeout(function() {
-        if (typeof fn === 'function') fn.apply(null, args);
-        else if (typeof fn === 'string') eval(fn);
+        fn.apply(null, args);
       }, scaledDelay);
     };
 
-    // Override setInterval
+    // Override setInterval - NO eval, string callbacks pass through to original
     window.setInterval = function(fn, delay) {
-      var args = Array.prototype.slice.call(arguments, 2);
+      if (typeof fn !== 'function') {
+        return originals.setInterval.apply(null, arguments);
+      }
+      var args = N.arraySlice.call(arguments, 2);
       var scaledDelay = Math.max(1, Math.round((delay || 0) / valueStore.getSpeedMultiplier()));
       return originals.setInterval(function() {
-        if (typeof fn === 'function') fn.apply(null, args);
-        else if (typeof fn === 'string') eval(fn);
+        fn.apply(null, args);
       }, scaledDelay);
     };
 
@@ -1299,30 +1444,31 @@
 (function(GVM) {
   'use strict';
 
+  var N = GVM.natives;
   var overlay = {};
   var panel = null;
   var shadowRoot = null;
 
   overlay.init = function(cssText) {
-    // Create host element
-    var host = document.createElement('div');
+    // Create host element using cached native DOM methods
+    var host = N.createElement('div');
     host.id = 'gvm-root';
     host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:2147483647;pointer-events:none;';
-    document.body.appendChild(host);
+    N.bodyAppendChild(host);
 
-    // Attach Shadow DOM
-    shadowRoot = host.attachShadow({ mode: 'open' });
+    // Attach Shadow DOM using cached native
+    shadowRoot = N.attachShadow(host, { mode: 'open' });
 
     // Inject styles
-    var style = document.createElement('style');
+    var style = N.createElement('style');
     style.textContent = cssText;
-    shadowRoot.appendChild(style);
+    N.appendChild(shadowRoot, style);
 
     // Build panel
-    panel = document.createElement('div');
+    panel = N.createElement('div');
     panel.className = 'gvm-panel';
     panel.style.pointerEvents = 'auto';
-    panel.innerHTML = [
+    N.setInnerHTML(panel, [
       '<div class="gvm-titlebar" id="gvm-titlebar">',
       '  <span class="gvm-title">GVM ENGINE</span>',
       '  <div class="gvm-title-buttons">',
@@ -1342,9 +1488,9 @@
       '  <div class="gvm-tab-content" id="gvm-tab-frozen"></div>',
       '  <div class="gvm-tab-content" id="gvm-tab-speed"></div>',
       '</div>'
-    ].join('\n');
+    ].join('\n'));
 
-    shadowRoot.appendChild(panel);
+    N.appendChild(shadowRoot, panel);
 
     // Init tabs
     setupTabs();
@@ -1361,18 +1507,17 @@
     GVM.ui.resultsTab.startAutoRefresh();
 
     // Stop events from reaching the game
-    panel.addEventListener('mousedown', function(e) { e.stopPropagation(); });
-    panel.addEventListener('click', function(e) { e.stopPropagation(); });
-    panel.addEventListener('keydown', function(e) { e.stopPropagation(); });
-    panel.addEventListener('keyup', function(e) { e.stopPropagation(); });
-    panel.addEventListener('keypress', function(e) { e.stopPropagation(); });
+    var stopEvents = ['mousedown', 'click', 'keydown', 'keyup', 'keypress'];
+    for (var ei = 0; ei < stopEvents.length; ei++) {
+      N.addEventListener(panel, stopEvents[ei], function(e) { e.stopPropagation(); });
+    }
   };
 
   function setupTabs() {
     var tabs = shadowRoot.querySelectorAll('.gvm-tab');
     for (var i = 0; i < tabs.length; i++) {
-      tabs[i].addEventListener('click', function() {
-        var tabName = this.getAttribute('data-tab');
+      N.addEventListener(tabs[i], 'click', function() {
+        var tabName = N.getAttribute(this, 'data-tab');
 
         // Deactivate all
         var allTabs = shadowRoot.querySelectorAll('.gvm-tab');
@@ -1403,7 +1548,7 @@
     var isDragging = false;
     var startX, startY, startRight, startTop;
 
-    titlebar.addEventListener('mousedown', function(e) {
+    N.addEventListener(titlebar, 'mousedown', function(e) {
       if (e.target.tagName === 'BUTTON') return;
       isDragging = true;
       startX = e.clientX;
@@ -1414,7 +1559,7 @@
       e.preventDefault();
     });
 
-    window.addEventListener('mousemove', function(e) {
+    N.addEventListener(window, 'mousemove', function(e) {
       if (!isDragging) return;
       e.preventDefault();
       var dx = e.clientX - startX;
@@ -1423,20 +1568,20 @@
       panel.style.top = Math.max(0, startTop + dy) + 'px';
     }, true);
 
-    window.addEventListener('mouseup', function() {
+    N.addEventListener(window, 'mouseup', function() {
       isDragging = false;
     }, true);
   }
 
   function setupControls() {
-    shadowRoot.querySelector('#gvm-minimize').addEventListener('click', function() {
+    N.addEventListener(shadowRoot.querySelector('#gvm-minimize'), 'click', function() {
       panel.classList.toggle('minimized');
       this.textContent = panel.classList.contains('minimized') ? '+' : '_';
     });
 
-    shadowRoot.querySelector('#gvm-close').addEventListener('click', function() {
-      var host = document.querySelector('#gvm-root');
-      if (host) host.remove();
+    N.addEventListener(shadowRoot.querySelector('#gvm-close'), 'click', function() {
+      var host = N.querySelector('#gvm-root');
+      if (host) N.remove(host);
       GVM.ui.resultsTab.stopAutoRefresh();
       window.__GVM_LOADED__ = false;
     });

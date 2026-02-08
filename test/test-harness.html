@@ -258,12 +258,79 @@
   </script>
 
   <!-- ============================================================ -->
-  <!-- GVM Engine (all modules inline) -->
+  <!-- GVM Engine (all modules inline, CSP-safe) -->
   <!-- ============================================================ -->
   <script>
+  // ---- utils/natives.js (MUST be first) ----
+  (function(GVM) {
+    'use strict';
+    var N = {};
+    N.defineProperty = Object.defineProperty;
+    N.getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+    N.keys = Object.keys;
+    N.freeze = Object.freeze;
+    N.isFrozen = Object.isFrozen;
+    N.isSealed = Object.isSealed;
+    N.getPrototypeOf = Object.getPrototypeOf;
+    N.hasOwnProperty = Object.prototype.hasOwnProperty;
+    N.toString = Object.prototype.toString;
+    N.isArray = Array.isArray;
+    N.arraySlice = Array.prototype.slice;
+    N.arrayFilter = Array.prototype.filter;
+    N.arrayForEach = Array.prototype.forEach;
+    N.createElement = document.createElement.bind(document);
+    N.createTextNode = document.createTextNode.bind(document);
+    N.querySelector = document.querySelector.bind(document);
+    N.querySelectorAll = document.querySelectorAll.bind(document);
+    N.getElementById = document.getElementById.bind(document);
+    N.bodyAppendChild = function(el) { return HTMLElement.prototype.appendChild.call(document.body, el); };
+    N.appendChild = function(parent, child) { return HTMLElement.prototype.appendChild.call(parent, child); };
+    N.remove = function(el) { if (el && el.parentNode) HTMLElement.prototype.removeChild.call(el.parentNode, el); };
+    N.attachShadow = function(el, opts) { return Element.prototype.attachShadow.call(el, opts); };
+    N.setAttribute = function(el, name, value) { return Element.prototype.setAttribute.call(el, name, value); };
+    N.getAttribute = function(el, name) { return Element.prototype.getAttribute.call(el, name); };
+    N.addEventListener = function(target, type, fn, opts) { return EventTarget.prototype.addEventListener.call(target, type, fn, opts); };
+    N.setTimeout = window.setTimeout.bind(window);
+    N.setInterval = window.setInterval.bind(window);
+    N.clearTimeout = window.clearTimeout.bind(window);
+    N.clearInterval = window.clearInterval.bind(window);
+    N.requestAnimationFrame = window.requestAnimationFrame.bind(window);
+    N.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+    N.dateNow = Date.now;
+    N.perfNow = performance.now.bind(performance);
+    N.WeakSet = WeakSet;
+    N.consoleLog = console.log.bind(console);
+    N.consoleError = console.error.bind(console);
+    N._trustedPolicy = null;
+    N._trustedPolicyInit = false;
+    N.setInnerHTML = function(el, html) {
+      if (!N._trustedPolicyInit) {
+        N._trustedPolicyInit = true;
+        try {
+          if (window.trustedTypes && window.trustedTypes.createPolicy) {
+            N._trustedPolicy = window.trustedTypes.createPolicy('gvm-engine', { createHTML: function(s) { return s; } });
+          }
+        } catch (e) {}
+      }
+      try {
+        if (N._trustedPolicy) el.innerHTML = N._trustedPolicy.createHTML(html);
+        else el.innerHTML = html;
+      } catch (e) {
+        try {
+          var template = N.createElement('template');
+          template.innerHTML = html;
+          while (el.firstChild) el.removeChild(el.firstChild);
+          N.appendChild(el, template.content.cloneNode(true));
+        } catch (e2) { el.textContent = html.replace(/<[^>]*>/g, ''); }
+      }
+    };
+    GVM.natives = N;
+  })(window.GVM = window.GVM || {});
+
   // ---- utils/type-checks.js ----
   (function(GVM) {
     'use strict';
+    var N = GVM.natives;
     var typeChecks = {};
     typeChecks.isNumber = function(val) { return typeof val === 'number' && isFinite(val); };
     typeChecks.isString = function(val) { return typeof val === 'string'; };
@@ -271,10 +338,10 @@
     typeChecks.isScannable = function(val) { return typeChecks.isNumber(val) || typeChecks.isString(val) || typeChecks.isBoolean(val); };
     typeChecks.isPlainObject = function(val) {
       if (!val || typeof val !== 'object') return false;
-      if (Array.isArray(val)) return true;
+      if (N.isArray(val)) return true;
       if (val.nodeType) return false;
       if (val.window === val && val.document) return false;
-      var tag = Object.prototype.toString.call(val);
+      var tag = N.toString.call(val);
       if (tag.indexOf('Array') > -1 && tag !== '[object Array]') return false;
       if (tag === '[object ArrayBuffer]') return false;
       if (tag === '[object WebGLRenderingContext]') return false;
@@ -289,10 +356,17 @@
   // ---- utils/safe-traverse.js ----
   (function(GVM) {
     'use strict';
+    var N = GVM.natives;
     var safeTraverse = {};
     safeTraverse.safeGet = function(obj, key) { try { return { value: obj[key], ok: true }; } catch (e) { return { value: undefined, ok: false }; } };
-    safeTraverse.safeSet = function(obj, key, value) { try { obj[key] = value; return true; } catch (e) { return false; } };
-    safeTraverse.safeKeys = function(obj) { try { return Object.keys(obj); } catch (e) { return []; } };
+    safeTraverse.safeSet = function(obj, key, value) {
+      try {
+        if (N.isFrozen(obj)) return false;
+        obj[key] = value;
+        return true;
+      } catch (e) { return false; }
+    };
+    safeTraverse.safeKeys = function(obj) { try { return N.keys(obj); } catch (e) { return []; } };
     safeTraverse.getByPath = function(root, pathArray) {
       var current = root;
       for (var i = 0; i < pathArray.length; i++) {
@@ -319,10 +393,11 @@
   // ---- utils/iframe-access.js ----
   (function(GVM) {
     'use strict';
+    var N = GVM.natives;
     var iframeAccess = {};
     iframeAccess.getAccessibleWindows = function() {
       var windows = [{ win: window, label: 'Main Window' }];
-      var iframes = document.querySelectorAll('iframe');
+      var iframes = N.querySelectorAll('iframe');
       for (var i = 0; i < iframes.length; i++) {
         try {
           var iframeWin = iframes[i].contentWindow;
@@ -339,6 +414,7 @@
   // ---- core/object-walker.js ----
   (function(GVM) {
     'use strict';
+    var N = GVM.natives;
     var typeChecks = GVM.utils.typeChecks;
     var safeTraverse = GVM.utils.safeTraverse;
     var objectWalker = {};
@@ -347,7 +423,7 @@
       options = options || {};
       var maxDepth = options.maxDepth || 7;
       var maxResults = options.maxResults || 50000;
-      var visited = new WeakSet();
+      var visited = new N.WeakSet();
       var resultCount = 0;
       var queue = [{ obj: root, path: [], depth: 0 }];
       while (queue.length > 0 && resultCount < maxResults) {
@@ -359,10 +435,10 @@
         if (!obj || typeof obj !== 'object') continue;
         try { if (visited.has(obj)) continue; visited.add(obj); } catch (e) { continue; }
         var keys = safeTraverse.safeKeys(obj);
-        if (Array.isArray(obj)) {
+        if (N.isArray(obj)) {
           for (var ai = 0; ai < Math.min(obj.length, 1000); ai++) keys.push(String(ai));
           var seen = {};
-          keys = keys.filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; });
+          keys = N.arrayFilter.call(keys, function(k) { if (seen[k]) return false; seen[k] = true; return true; });
         }
         for (var ki = 0; ki < keys.length && resultCount < maxResults; ki++) {
           var key = keys[ki];
@@ -385,6 +461,7 @@
   // ---- core/value-store.js ----
   (function(GVM) {
     'use strict';
+    var N = GVM.natives;
     var valueStore = {};
     var state = { candidates: [], frozen: [], scanCount: 0, speedMultiplier: 1.0 };
     valueStore.getState = function() { return state; };
@@ -395,8 +472,8 @@
     valueStore.incrementScanCount = function() { state.scanCount++; };
     valueStore.getFrozen = function() { return state.frozen; };
     valueStore.addFrozen = function(entry) { state.frozen.push(entry); };
-    valueStore.removeFrozen = function(index) { var e = state.frozen[index]; if (e && e.intervalId) clearInterval(e.intervalId); state.frozen.splice(index, 1); };
-    valueStore.clearFrozen = function() { for (var i = 0; i < state.frozen.length; i++) { if (state.frozen[i].intervalId) clearInterval(state.frozen[i].intervalId); } state.frozen = []; };
+    valueStore.removeFrozen = function(index) { var e = state.frozen[index]; if (e && e.intervalId) N.clearInterval(e.intervalId); state.frozen.splice(index, 1); };
+    valueStore.clearFrozen = function() { for (var i = 0; i < state.frozen.length; i++) { if (state.frozen[i].intervalId) N.clearInterval(state.frozen[i].intervalId); } state.frozen = []; };
     valueStore.getSpeedMultiplier = function() { return state.speedMultiplier; };
     valueStore.setSpeedMultiplier = function(v) { state.speedMultiplier = v; };
     GVM.core = GVM.core || {};
@@ -523,6 +600,7 @@
   // ---- core/modifier.js ----
   (function(GVM) {
     'use strict';
+    var N = GVM.natives;
     var valueStore = GVM.core.valueStore;
     var safeTraverse = GVM.utils.safeTraverse;
     var iframeAccess = GVM.utils.iframeAccess;
@@ -537,13 +615,17 @@
       var frozen = false, originalDescriptor = null, intervalId = null;
       if (parentResult.ok && parentResult.value) {
         var parent = parentResult.value;
-        try {
-          originalDescriptor = Object.getOwnPropertyDescriptor(parent, key);
-          Object.defineProperty(parent, key, { get: function() { return value; }, set: function() {}, configurable: true, enumerable: originalDescriptor ? originalDescriptor.enumerable : true });
-          frozen = true;
-        } catch (e) {}
+        if (!N.isFrozen(parent)) {
+          try {
+            originalDescriptor = N.getOwnPropertyDescriptor(parent, key);
+            if (!originalDescriptor || originalDescriptor.configurable) {
+              N.defineProperty(parent, key, { get: function() { return value; }, set: function() {}, configurable: true, enumerable: originalDescriptor ? originalDescriptor.enumerable : true });
+              frozen = true;
+            }
+          } catch (e) {}
+        }
       }
-      if (!frozen) { intervalId = setInterval(function() { safeTraverse.setByPath(root.win, candidate.path, value); }, 50); }
+      if (!frozen) { intervalId = N.setInterval(function() { safeTraverse.setByPath(root.win, candidate.path, value); }, 50); }
       valueStore.addFrozen({ rootIndex: candidate.rootIndex, path: candidate.path.slice(), pathStr: candidate.path.join('.'), value: value, frozen: true, useDefineProperty: frozen, originalDescriptor: originalDescriptor, intervalId: intervalId });
       return true;
     };
@@ -558,7 +640,7 @@
           var parentPath = entry.path.slice(0, -1);
           var key = entry.path[entry.path.length - 1];
           var parentResult = safeTraverse.getByPath(root.win, parentPath);
-          if (parentResult.ok && parentResult.value) { try { Object.defineProperty(parentResult.value, key, entry.originalDescriptor); } catch (e) {} }
+          if (parentResult.ok && parentResult.value) { try { N.defineProperty(parentResult.value, key, entry.originalDescriptor); } catch (e) {} }
         }
       }
       valueStore.removeFrozen(index);
@@ -575,36 +657,31 @@
   // ---- core/speed-hack.js ----
   (function(GVM) {
     'use strict';
+    var N = GVM.natives;
     var valueStore = GVM.core.valueStore;
     var speedHack = {};
-    var originals = { setTimeout: null, setInterval: null, clearTimeout: null, clearInterval: null, requestAnimationFrame: null, cancelAnimationFrame: null, dateNow: null, perfNow: null };
+    var originals = { setTimeout: N.setTimeout, setInterval: N.setInterval, clearTimeout: N.clearTimeout, clearInterval: N.clearInterval, requestAnimationFrame: N.requestAnimationFrame, cancelAnimationFrame: N.cancelAnimationFrame, dateNow: N.dateNow, perfNow: N.perfNow };
     var active = false, baseRealTime = 0, baseFakeTime = 0;
     speedHack.isActive = function() { return active; };
     speedHack.getMultiplier = function() { return valueStore.getSpeedMultiplier(); };
-    function getFakeTime() { var realNow = originals.perfNow ? originals.perfNow.call(performance) : Date.now(); return baseFakeTime + (realNow - baseRealTime) * valueStore.getSpeedMultiplier(); }
+    function getFakeTime() { var realNow = originals.perfNow(); return baseFakeTime + (realNow - baseRealTime) * valueStore.getSpeedMultiplier(); }
     speedHack.activate = function(multiplier) {
-      if (active) { baseFakeTime = getFakeTime(); baseRealTime = originals.perfNow ? originals.perfNow.call(performance) : Date.now(); valueStore.setSpeedMultiplier(multiplier); return; }
-      originals.setTimeout = window.setTimeout.bind(window);
-      originals.setInterval = window.setInterval.bind(window);
-      originals.clearTimeout = window.clearTimeout.bind(window);
-      originals.clearInterval = window.clearInterval.bind(window);
-      originals.requestAnimationFrame = window.requestAnimationFrame.bind(window);
-      originals.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
-      originals.dateNow = Date.now;
-      originals.perfNow = performance.now.bind(performance);
+      if (active) { baseFakeTime = getFakeTime(); baseRealTime = originals.perfNow(); valueStore.setSpeedMultiplier(multiplier); return; }
       baseRealTime = originals.perfNow();
       baseFakeTime = baseRealTime;
       valueStore.setSpeedMultiplier(multiplier);
       active = true;
       window.setTimeout = function(fn, delay) {
-        var args = Array.prototype.slice.call(arguments, 2);
+        if (typeof fn !== 'function') return originals.setTimeout.apply(null, arguments);
+        var args = N.arraySlice.call(arguments, 2);
         var scaledDelay = Math.max(1, Math.round((delay || 0) / valueStore.getSpeedMultiplier()));
-        return originals.setTimeout(function() { if (typeof fn === 'function') fn.apply(null, args); }, scaledDelay);
+        return originals.setTimeout(function() { fn.apply(null, args); }, scaledDelay);
       };
       window.setInterval = function(fn, delay) {
-        var args = Array.prototype.slice.call(arguments, 2);
+        if (typeof fn !== 'function') return originals.setInterval.apply(null, arguments);
+        var args = N.arraySlice.call(arguments, 2);
         var scaledDelay = Math.max(1, Math.round((delay || 0) / valueStore.getSpeedMultiplier()));
-        return originals.setInterval(function() { if (typeof fn === 'function') fn.apply(null, args); }, scaledDelay);
+        return originals.setInterval(function() { fn.apply(null, args); }, scaledDelay);
       };
       window.clearTimeout = originals.clearTimeout;
       window.clearInterval = originals.clearInterval;
@@ -957,22 +1034,23 @@
   // ---- ui/overlay.js ----
   (function(GVM) {
     'use strict';
+    var N = GVM.natives;
     var overlay = {};
     var panel = null;
     var shadowRoot = null;
     overlay.init = function(cssText) {
-      var host = document.createElement('div');
+      var host = N.createElement('div');
       host.id = 'gvm-root';
       host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:2147483647;pointer-events:none;';
-      document.body.appendChild(host);
-      shadowRoot = host.attachShadow({ mode: 'open' });
-      var style = document.createElement('style');
+      N.bodyAppendChild(host);
+      shadowRoot = N.attachShadow(host, { mode: 'open' });
+      var style = N.createElement('style');
       style.textContent = cssText;
-      shadowRoot.appendChild(style);
-      panel = document.createElement('div');
+      N.appendChild(shadowRoot, style);
+      panel = N.createElement('div');
       panel.className = 'gvm-panel';
       panel.style.pointerEvents = 'auto';
-      panel.innerHTML =
+      N.setInnerHTML(panel,
         '<div class="gvm-titlebar" id="gvm-titlebar">' +
         '  <span class="gvm-title">GVM ENGINE</span>' +
         '  <div class="gvm-title-buttons">' +
@@ -991,13 +1069,13 @@
         '  <div class="gvm-tab-content" id="gvm-tab-results"></div>' +
         '  <div class="gvm-tab-content" id="gvm-tab-frozen"></div>' +
         '  <div class="gvm-tab-content" id="gvm-tab-speed"></div>' +
-        '</div>';
-      shadowRoot.appendChild(panel);
+        '</div>');
+      N.appendChild(shadowRoot, panel);
       // Setup tabs
       var tabs = shadowRoot.querySelectorAll('.gvm-tab');
       for (var i = 0; i < tabs.length; i++) {
-        tabs[i].addEventListener('click', function() {
-          var tabName = this.getAttribute('data-tab');
+        N.addEventListener(tabs[i], 'click', function() {
+          var tabName = N.getAttribute(this, 'data-tab');
           var allTabs = shadowRoot.querySelectorAll('.gvm-tab');
           for (var j = 0; j < allTabs.length; j++) allTabs[j].classList.remove('active');
           var allContents = shadowRoot.querySelectorAll('.gvm-tab-content');
@@ -1011,28 +1089,28 @@
       // Dragging
       var titlebar = shadowRoot.querySelector('#gvm-titlebar');
       var isDragging = false, startX, startY, startRight, startTop;
-      titlebar.addEventListener('mousedown', function(e) {
+      N.addEventListener(titlebar, 'mousedown', function(e) {
         if (e.target.tagName === 'BUTTON') return;
         isDragging = true; startX = e.clientX; startY = e.clientY;
         var rect = panel.getBoundingClientRect();
         startRight = window.innerWidth - rect.right; startTop = rect.top;
         e.preventDefault();
       });
-      window.addEventListener('mousemove', function(e) {
+      N.addEventListener(window, 'mousemove', function(e) {
         if (!isDragging) return;
         e.preventDefault();
         panel.style.right = Math.max(0, startRight - (e.clientX - startX)) + 'px';
         panel.style.top = Math.max(0, startTop + (e.clientY - startY)) + 'px';
       }, true);
-      window.addEventListener('mouseup', function() { isDragging = false; }, true);
+      N.addEventListener(window, 'mouseup', function() { isDragging = false; }, true);
       // Controls
-      shadowRoot.querySelector('#gvm-minimize').addEventListener('click', function() {
+      N.addEventListener(shadowRoot.querySelector('#gvm-minimize'), 'click', function() {
         panel.classList.toggle('minimized');
         this.textContent = panel.classList.contains('minimized') ? '+' : '_';
       });
-      shadowRoot.querySelector('#gvm-close').addEventListener('click', function() {
-        var h = document.querySelector('#gvm-root');
-        if (h) h.remove();
+      N.addEventListener(shadowRoot.querySelector('#gvm-close'), 'click', function() {
+        var h = N.querySelector('#gvm-root');
+        if (h) N.remove(h);
         GVM.ui.resultsTab.stopAutoRefresh();
         window.__GVM_LOADED__ = false;
       });
@@ -1043,9 +1121,10 @@
       GVM.ui.speedTab.init(shadowRoot.querySelector('#gvm-tab-speed'));
       GVM.ui.resultsTab.startAutoRefresh();
       // Stop events from reaching the game
-      ['mousedown','click','keydown','keyup','keypress'].forEach(function(evt) {
-        panel.addEventListener(evt, function(e) { e.stopPropagation(); });
-      });
+      var stopEvents = ['mousedown','click','keydown','keyup','keypress'];
+      for (var ei = 0; ei < stopEvents.length; ei++) {
+        N.addEventListener(panel, stopEvents[ei], function(e) { e.stopPropagation(); });
+      }
     };
     overlay.getPanel = function() { return panel; };
     overlay.getShadowRoot = function() { return shadowRoot; };
